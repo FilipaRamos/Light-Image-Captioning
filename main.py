@@ -6,7 +6,8 @@ import time
 import torch
 import numpy as np
 
-import opts
+import utils.opts as opts
+import models.blocks as model
 
 try:
     import tensorflow as tf
