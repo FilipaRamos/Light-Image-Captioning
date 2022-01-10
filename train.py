@@ -22,11 +22,16 @@ def train():
         caption_model.save(os.path.join(filepath, 'model_' + str(i) + '.h5'))
     
     '''
-    generator = data_gen.DataGenerator()
-    caption_model.fit_generator(generator)
+    train_gen = data_gen.DataGenerator()
+    val_gen = data_gen.DataGenerator()
+    caption_model.fit_generator(generator=train_gen, 
+                                validation_data=val_gen,
+                                use_multiprocesing=True,
+                                workers=6,
+                                epochs=20)
     '''
 
-
 if __name__ == "__main__":
+    print('<Train>')
     train()
     print('<Done>')

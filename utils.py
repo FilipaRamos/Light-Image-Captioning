@@ -55,6 +55,9 @@ def set_tokenizer(data):
     tokenizer.fit_on_texts(l)
     return tokenizer
 
+def save_tokenizer(tokenizer, file):
+    pickle.dump(tokenizer, open(file, 'wb'))
+
 def max_length(data):
     lines = to_list(data)
     return max(len(d.split()) for d in lines)
@@ -105,12 +108,35 @@ def data_generator(descs, images, tokenizer, max_length, vocab_size):
             in_img, in_seq, out = create_seq(tokenizer, max_length, desc_l, img, vocab_size)
             yield [in_img, in_seq], out
 
+def word_by_id(id, tokenizer):
+    for word, idx in tokenizer.word_index.items():
+        if idx == id:
+            return word
+    return None
+
+def generate_desc(model, tokenizer, img, max_length):
+    input = 'startseq'
+    for i in range(max_length):
+        seq = tokenizer.texts_to_sequences([input])[0]
+        seq = pad_sequences([seq], maxlen=max_length)
+        pred = model.predict([img, seq], verbose=0)
+        pred = np.argmax(pred)
+        word = word_by_id(pred, tokenizer)
+
+        if word is None:
+            break
+        input += ' ' + word
+        if word == 'endseq':
+            break
+    return input
+
 def prepare():
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     file_train = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
     file_test = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
     file_d = os.path.join(cur_dir, 'data/descriptions.txt')
     file_img = os.path.join(cur_dir, 'data/features.pkl')
+    file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
 
     data = load_set(file_train)
     print('Train dataset>%d' % len(data))
@@ -120,10 +146,11 @@ def prepare():
     print("Train features size>%d" % len(features))
 
     tokenizer = set_tokenizer(descriptions)
+    save_tokenizer(tokenizer, file_tk)
     vocab_size = len(tokenizer.word_index) + 1
     print('Vocab size>%d' % vocab_size)
-    max_length = max_length(descriptions)
-    print('Max length>%d' % max_length)
+    maxlen = max_length(descriptions)
+    print('Max length>%d' % maxlen)
     
     # Test
     data_test = load_set(file_test)
@@ -133,14 +160,14 @@ def prepare():
     features_test = load_img_features(file_img, data_test)
     print("Test features size>%d" % len(features_test))
 
-    return descriptions, features, descriptions_test, features_test, tokenizer, vocab_size, max_length
-
+    return descriptions, features, descriptions_test, features_test, tokenizer, vocab_size, maxlen
 
 if __name__ == "__main__":
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     file = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
     file_d = os.path.join(cur_dir, 'data/descriptions.txt')
     file_img = os.path.join(cur_dir, 'data/features.pkl')
+    file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
 
     data = load_set(file)
     print('Train dataset>%d' % len(data))
@@ -150,6 +177,7 @@ if __name__ == "__main__":
     print("Train features size>%s" % len(features))
 
     tokenizer = set_tokenizer(descriptions)
+    save_tokenizer(tokenizer, file_tk)
     vocab_size = len(tokenizer.word_index) + 1
     print('Vocab size>%d' % vocab_size)
     maxlen = max_length(descriptions)
