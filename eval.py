@@ -50,7 +50,7 @@ def eval_all_checkpoints(checkpoints_dir, descriptions_test, features_test, toke
 def eval_checkpoint(checkpoints_dir, filename, descriptions_test, features_test, tokenizer, max_length):
     checkpoint = os.path.join(checkpoints_dir, filename)
         
-    caption_model = load_model(checkpoint)
+    caption_model = load_model(checkpoints_dir)
     eval_model(caption_model, descriptions_test, features_test, tokenizer, max_length)
 
 def eval():

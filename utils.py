@@ -1,10 +1,17 @@
 import os
 import pickle
+import configparser
 import numpy as np
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+# Load a config file
+def load_cfg(file):
+    config = configparser.ConfigParser()
+    config.read(file)
+    return config
 
 # Load a file
 def load_file(file):
@@ -48,6 +55,12 @@ def to_list(data):
     for key in data.keys():
         [descs.append(d) for d in data[key]]
     return descs
+
+def array_to_str(arr):
+    sentence = ' '
+    for word in arr:
+        sentence += word + ' '
+    return sentence
 
 def set_tokenizer(data):
     l = to_list(data)
@@ -138,6 +151,7 @@ def prepare():
     file_img = os.path.join(cur_dir, 'data/features.pkl')
     file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
 
+    # Train
     data = load_set(file_train)
     print('Train dataset>%d' % len(data))
     descriptions = load_clean_descriptions(file_d, data)
@@ -163,21 +177,4 @@ def prepare():
     return descriptions, features, descriptions_test, features_test, tokenizer, vocab_size, maxlen
 
 if __name__ == "__main__":
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-    file = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
-    file_d = os.path.join(cur_dir, 'data/descriptions.txt')
-    file_img = os.path.join(cur_dir, 'data/features.pkl')
-    file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
-
-    data = load_set(file)
-    print('Train dataset>%d' % len(data))
-    descriptions = load_clean_descriptions(file_d, data)
-    print("Train descriptions>%s" % len(descriptions))
-    features = load_img_features(file_img, data)
-    print("Train features size>%s" % len(features))
-
-    tokenizer = set_tokenizer(descriptions)
-    save_tokenizer(tokenizer, file_tk)
-    vocab_size = len(tokenizer.word_index) + 1
-    print('Vocab size>%d' % vocab_size)
-    maxlen = max_length(descriptions)
+    prepare()

@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from tensorflow.keras.layers import Input
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Dropout
@@ -8,7 +10,7 @@ from tensorflow.keras.layers import Add
 from tensorflow.keras import Model
 from tensorflow.keras.utils import plot_model
 
-def caption_model(vocab_size, max_length, file):
+def simple_caption_model(vocab_size, max_length, file):
     # Feature Extraction
     input1 = Input(shape=(4096,))
     f1 = Dropout(0.5)(input1)
@@ -31,3 +33,6 @@ def caption_model(vocab_size, max_length, file):
     plot_model(model, to_file=file, show_shapes=True)
     
     return model
+
+#class TransformerBlock(tf.keras.layers.Layer):
+    #def __init__():
