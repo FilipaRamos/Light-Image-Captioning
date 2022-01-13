@@ -10,7 +10,7 @@ from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.preprocessing.text import Tokenizer
 
 from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+from tensorflow.keras.applications.vgg19 import VGG19, preprocess_input
 
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,8 +28,8 @@ class Demo():
 
     def extract_features(self, img_file):
         if self.cfg['default']['backbone'] == 'vgg':
-            model = VGG16()
-        model = Model(inputs=model.inputs, outputs=model.layers[-2].output)
+            model = VGG19()
+            model = Model(inputs=model.inputs, outputs=model.layers[-2].output)
         img = image.load_img(img_file, target_size=(224, 224))
         img = image.img_to_array(img)
         img = img.reshape((1, img.shape[0], img.shape[1], img.shape[2]))

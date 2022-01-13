@@ -20,10 +20,6 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.ids = utils.load_set(file)
         self.maxlen = max_length
 
-        '''self.img_dim = img_dim
-        self.seq_dim = seq_dim
-        self.out_dim = out_dim'''
-
         self.batch_size = batch_size
         self.shuffle = shuffle
 
@@ -44,7 +40,7 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __data_generation(self, ids_tmp):
         features = utils.load_img_features(self.img_file, ids_tmp)
         descs = utils.load_clean_descriptions(self.descs_file, ids_tmp)
-        return utils.create_all_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
+        return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
 
     def __len__(self):
         return int(np.floor(len(self.ids) / self.batch_size))
@@ -55,4 +51,10 @@ class DataGenerator(tf.keras.utils.Sequence):
         ids = [tmp[k] for k in indexes]
 
         x1, x2, y = self.__data_generation(ids)
-        return [x1, x2], y
+        return x1, x2, y
+
+    def get_batch_size(self):
+        return self.batch_size
+
+    def get_max_count(self):
+        return len(self.ids)

@@ -101,6 +101,38 @@ def create_all_seqs(tokenizer, max_length, data, images, vocab_size):
                 y.append(out_seq)
     return np.array(x1), np.array(x2), np.array(y)
 
+def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
+    ''' Training Sequences
+        Input:
+        1. img startseq
+        2. img startseq, bird
+        3. img startseq, bird, flying
+        4. img startseq, bird, flying, at
+        5. img startseq, bird, flying, at, sea
+        6. img startseq, bird, flying, at, sea, endseq
+        Shape of a sample:
+        (batch_size, max_length, vocab_size)
+         '''
+    x1, x2, y = list(), list(), list()
+    for key, desc_l in data.items():
+        for desc in desc_l:
+            # encode with tokenizer
+            seq = tokenizer.texts_to_sequences([desc])[0]
+            # split into pairs
+            desc_label = np.zeros((max_length, vocab_size))
+            size = max_length - len(seq)
+            desc_label_idx = size
+            for i in range(1, len(seq)):
+                in_seq, out_seq = seq[:i], seq[i]
+                in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
+                out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
+                desc_label[desc_label_idx + i, :] = out_seq
+
+            x1.append(images[key][0])
+            x2.append(in_seq)
+            y.append(desc_label)
+    return np.array(x1), np.array(x2), np.array(y)
+
 def create_seq(tokenizer, max_length, desc_l, image, vocab_size):
     x1, x2, y = list(), list(), list()
     for desc in desc_l:
@@ -165,7 +197,7 @@ def prepare():
     print('Vocab size>%d' % vocab_size)
     maxlen = max_length(descriptions)
     print('Max length>%d' % maxlen)
-    
+
     # Test
     data_test = load_set(file_test)
     print('Test dataset>%d' % len(data_test))
