@@ -44,27 +44,26 @@ def transformer_caption_model(f_shape, vocab_size, max_length, file):
     # Image Feature Extraction
     f_input = Input(shape=f_shape)
     f_out = layers.FeatureEncoder(EMBED_DIM)(f_input)
-    # Language Encoder
-    #enc_input = Input(shape=(EMBED_DIM,), dtype="int32", name="encoder_input")
-    #enc_emb = layers.Embedding2D(ROW_SIZE, COL_SIZE, EMBED_DIM, max_length)(f1)
+    
+    # Encoder
+    # enc_input (embed_dim,)
     enc_emb = layers.TokenAndPositionEmbedding(max_length, vocab_size, EMBED_DIM)(f_out)
     # Limit shape of tensor to max seq length
     enc_emb = enc_emb[:, :max_length, :]
     enc_out = layers.TransformerEncoder(EMBED_DIM, NUM_HEADS, LATENT_DIM)(enc_emb)
-    #encoder = Model([f_input], enc_out, name="encoder")
-    #out_e = encoder([f_input]) # (batch_size, max_length, vocab_size)
+    # enc_out (batch_size, max_length, vocab_size)
+
     # Language Decoder
     dec_input = Input(shape=(max_length,), dtype="int32", name="decoder_input")
-    #enc_seq_input = Input(shape=(None, EMBED_DIM), name="decoder_state_input")
+    # enc_seq_input (batch_size, max_length, vocab_size)
     x = layers.TokenAndPositionEmbedding(max_length, vocab_size, EMBED_DIM)(dec_input)
     x = layers.TransformerDecoder(EMBED_DIM, LATENT_DIM, NUM_HEADS)(x, enc_out)
     x = Dropout(0.5)(x)
     dec_out = Dense(vocab_size, activation="softmax")(x)
-    #decoder = Model([dec_input, enc_out], dec_out, name="decoder")
+
     # Model Compilation
-    #out = decoder([dec_input, enc_out]) # (batch_size, max_length, vocab_size)
+    # dec_out (batch_size, max_length, vocab_size)
     model = Model(inputs=[f_input, dec_input], outputs=dec_out, name="transformer_caption_model")
-    # Not sparse loss?
     model.compile(loss='categorical_crossentropy', optimizer='adam')
     # Summary
     print(model.summary())

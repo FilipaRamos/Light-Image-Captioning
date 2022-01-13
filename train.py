@@ -12,15 +12,7 @@ from tensorflow.keras.utils import Progbar
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.losses import CategoricalCrossentropy
 
-def loss_function(loss_obj, real, pred):
-    mask = tf.math.logical_not(tf.math.equal(real, 0))
-    #pred = tf.squeeze(pred[:, -1:, :]) # (batch_size, max_length, vocab_size) ->(batch_size, vocab_size)
-    loss_ = loss_obj(real, pred)
-    mask = tf.cast(mask, dtype=loss_.dtype)
-    loss_ *= mask
-    return tf.reduce_sum(loss_)/tf.reduce_sum(mask)
-
-def train(config):
+def prep_train(config):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     checkpoints = os.path.join(cur_dir, 'checkpoints')
     if len(config.split('.')) < 2:
@@ -31,7 +23,7 @@ def train(config):
     cfg =  utils.load_cfg(cfg_file)['default']
     _, _, _, _, _, vocab_size, max_length = utils.prepare()
     file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
-    f_shape = (4096,)
+    f_shape = (int(cfg['f_shape']),)
 
     if cfg['model'] == 'simple':
         caption_model = model.simple_caption_model(f_shape, vocab_size, max_length, file_model)
@@ -43,22 +35,20 @@ def train(config):
     if not os.path.exists(run_path):
         os.mkdir(run_path)
 
-    checkpoint_callback = ModelCheckpoint(filepath=run_path,
-                                            save_weights_only=False,
-                                            monitor='loss',
-                                            mode='min',
-                                            save_best_only=True)
-    
-    train_gen = data_gen.DataGenerator(vocab_size, max_length)
-    #train_dataset = tf.data.Dataset.from_generator(train_gen, (np.ndarray, np.ndarray, np.ndarray))
-    #if cfg['model'] == 'transformer':
-    #    caption_model.compile(optimizer='adam',
-    #                        loss=SparseCategoricalCrossentropy())
-    #else:    
-    #    caption_model.compile(optimizer='adam',
-    #                        loss=CategoricalCrossentropy())
+    return run_path, cfg, vocab_size, max_length, caption_model
 
-    #lr_schedule = CustomSchedule(f_shape)
+def loss_function(loss_obj, real, pred):
+    mask = tf.math.logical_not(tf.math.equal(real, 0))
+    #pred = tf.squeeze(pred[:, -1:, :]) # (batch_size, max_length, vocab_size) ->(batch_size, vocab_size)
+    loss_ = loss_obj(real, pred)
+    mask = tf.cast(mask, dtype=loss_.dtype)
+    loss_ *= mask
+    return tf.reduce_sum(loss_)/tf.reduce_sum(mask)
+
+def train(config):
+    # Prepare variables
+    run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
+
     lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
                             initial_learning_rate=1e-4,
                             decay_steps=10000,
@@ -68,20 +58,32 @@ def train(config):
                                     epsilon=1e-9)
     loss_object = CategoricalCrossentropy()
 
-    #caption_model.fit(x=train_gen,
-    #                    use_multiprocessing=False,
-                        #workers=6,
-    #                    epochs=int(cfg['epochs']),
-    #                    callbacks=[checkpoint_callback])
+    checkpoint_callback = ModelCheckpoint(filepath=run_path,
+                                            save_weights_only=False,
+                                            monitor=loss_object,
+                                            mode='min',
+                                            save_best_only=True)
+    callbacks = tf.keras.callbacks.CallbackList(
+                                            [checkpoint_callback], 
+                                            add_history=True, 
+                                            model=caption_model)
+
+    train_gen = data_gen.DataGenerator(vocab_size, max_length, cfg['model'])
     metric_name = ['cross_entropy']
     batch_size = train_gen.get_batch_size()
     num_samples = int(train_gen.get_max_count() / batch_size)
 
+    logs = {}
+    callbacks.on_train_begin(logs=logs)
     for epoch in range(int(cfg['epochs'])):
+        callbacks.on_epoch_begin(epoch, logs=logs)
+
         start = time.time()
         pb_i = Progbar(num_samples, stateful_metrics=metric_name)
+        
         for c in range(0, num_samples, batch_size):
             f_tensor, seq_tensor, target = train_gen.__getitem__(c)
+
             with tf.GradientTape() as tape:
                 # If the batch only has one sample, expand dims to match previous tensors
                 if len(seq_tensor.shape) < 2:
@@ -90,7 +92,7 @@ def train(config):
                     target = tf.expand_dims(target, axis=0)
 
                 seq_tensor = seq_tensor[:, :-1]
-                target = target[:, 1:]
+                target = target[:, 1:, :]
                 
                 pred = caption_model([f_tensor, seq_tensor])
                 loss = loss_function(loss_object, target, pred)
@@ -99,14 +101,21 @@ def train(config):
 
             gradients = tape.gradient(loss, caption_model.trainable_variables)
             optimizer.apply_gradients(
-                (grad, var)
-                for (grad, var) in zip(gradients, caption_model.trainable_variables)
-                if grad is not None
-                )
+                            (grad, var)
+                            for (grad, var) in zip(gradients, caption_model.trainable_variables)
+                            if grad is not None)
 
-        print('Epoch {} Loss {:.4f}'.format(epoch + 1, loss))
+        callbacks.on_epoch_end(epoch, logs=logs)
+        print('Epoch {} :>: Loss {:.4f}'.format(epoch + 1, loss))
         print('Time taken for 1 epoch {} secs\n'.format(time.time() - start))
         train_gen.on_epoch_end()
+
+    callbacks.on_train_end(logs=logs)
+    hist_obj = None
+    for cb in callbacks:
+        if isinstance(cb, tf.keras.callbacks.History):
+            hist_obj = cb
+    assert hist_obj is not None
 
 if __name__ == "__main__":
     print('<Train>')

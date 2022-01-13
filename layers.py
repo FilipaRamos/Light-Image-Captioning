@@ -17,22 +17,6 @@ class FeatureEncoder(layers.Layer):
         x = self.dropout(x, training=training)
         return self.dense(x)
 
-class Embedding2D(layers.Layer):
-    def __init__(self, row_size, col_size, f_shape, max_length, rate=0.1):
-        super(Embedding2D, self).__init__()
-        self.max_length = max_length
-        self.embedding = Dense(f_shape, activation='relu')
-        self.pos_encoding = layers.Embedding(
-                                    input_dim=f_shape, 
-                                    output_dim=f_shape
-                                    )
-        self.dropout = Dropout(rate)
-
-    def call(self, x, training, mask=None):
-        x = self.embedding(x)
-        x_ = self.pos_encoding(x)
-        return self.dropout(x, training=training)
-
 class TokenAndPositionEmbedding(layers.Layer):
     def __init__(self, maxlen, vocab_size, embed_dim):
         super(TokenAndPositionEmbedding, self).__init__()

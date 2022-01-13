@@ -8,7 +8,7 @@ import utils
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
 class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, vocab_size, max_length, batch_size=2, shuffle=True, train=True, load=True):
+    def __init__(self, vocab_size, max_length, model, batch_size=2, shuffle=True, train=True, load=True):
         self.descs_file = os.path.join(cur_dir, 'data/descriptions.txt')
         self.img_file = os.path.join(cur_dir, 'data/features.pkl')
         tk_file = os.path.join(cur_dir, 'data/tokenizer.pkl')
@@ -29,6 +29,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         else:
             self.tokenizer = pickle.load(open(tk_file, 'rb'))
 
+        self.model = model
         self.vocab_size = vocab_size
         self.on_epoch_end()
 
@@ -40,7 +41,10 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __data_generation(self, ids_tmp):
         features = utils.load_img_features(self.img_file, ids_tmp)
         descs = utils.load_clean_descriptions(self.descs_file, ids_tmp)
-        return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
+        if self.model == 'transformer':
+            return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
+        else:
+            return utils.create_all_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
 
     def __len__(self):
         return int(np.floor(len(self.ids) / self.batch_size))

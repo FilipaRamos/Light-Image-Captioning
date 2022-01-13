@@ -17,7 +17,6 @@ def feature_extraction(in_dir, cfg):
         model = Model(inputs=model.inputs, outputs=model.layers[-2].output)
     elif cfg['default']['backbone'] == 'inception':
         model = InceptionV3(weights='imagenet', include_top=False)
-        #print(model.layers)
         model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
     print(model.summary())
     # Pre-extract features for all images in the dataset
@@ -33,7 +32,6 @@ def feature_extraction(in_dir, cfg):
         ft = model.predict(img, verbose=0)
         img_id = name.split('.')[0]
         features[img_id] = ft
-        print(ft.shape)
         print("Done with>%s" % name)
     return features
 
