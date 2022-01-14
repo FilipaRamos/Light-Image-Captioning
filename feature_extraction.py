@@ -39,9 +39,9 @@ if __name__ == "__main__":
     in_dir = os.path.join(cur_dir, 'data/Flicker8k_Dataset')
 
     if len(sys.argv) > 1:
-        cfg_f = os.path.join(cur_dir, 'config/' + sys.argv[1])
+        cfg_f = os.path.join(cur_dir, 'config/' + sys.argv[1] + '.cfg')
     else:
-        cfg_f = os.path.join(cur_dir, 'config/flickr_inception_simple.cfg')
+        cfg_f = os.path.join(cur_dir, 'config/flickr_inception_transformer.cfg')
     cfg = utils.load_cfg(cfg_f)
 
     features = feature_extraction(in_dir, cfg)

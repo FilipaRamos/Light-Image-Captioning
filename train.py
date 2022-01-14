@@ -39,7 +39,6 @@ def prep_train(config):
 
 def loss_function(loss_obj, real, pred):
     mask = tf.math.logical_not(tf.math.equal(real, 0))
-    #pred = tf.squeeze(pred[:, -1:, :]) # (batch_size, max_length, vocab_size) ->(batch_size, vocab_size)
     loss_ = loss_obj(real, pred)
     mask = tf.cast(mask, dtype=loss_.dtype)
     loss_ *= mask
@@ -56,28 +55,15 @@ def train(config):
     )
     optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
                                     epsilon=1e-9)
-    loss_object = CategoricalCrossentropy()
-
-    checkpoint_callback = ModelCheckpoint(filepath=run_path,
-                                            save_weights_only=False,
-                                            monitor=loss_object,
-                                            mode='min',
-                                            save_best_only=True)
-    callbacks = tf.keras.callbacks.CallbackList(
-                                            [checkpoint_callback], 
-                                            add_history=True, 
-                                            model=caption_model)
+    loss_object = CategoricalCrossentropy(reduction='none')
+    loss_monitor = 0
 
     train_gen = data_gen.DataGenerator(vocab_size, max_length, cfg['model'])
     metric_name = ['cross_entropy']
     batch_size = train_gen.get_batch_size()
     num_samples = int(train_gen.get_max_count() / batch_size)
 
-    logs = {}
-    callbacks.on_train_begin(logs=logs)
     for epoch in range(int(cfg['epochs'])):
-        callbacks.on_epoch_begin(epoch, logs=logs)
-
         start = time.time()
         pb_i = Progbar(num_samples, stateful_metrics=metric_name)
         
@@ -95,7 +81,8 @@ def train(config):
                 target = target[:, 1:, :]
                 
                 pred = caption_model([f_tensor, seq_tensor])
-                loss = loss_function(loss_object, target, pred)
+                #loss = loss_function(loss_object, target, pred)
+                loss = loss_object(target, pred)
                 
                 pb_i.add(batch_size, values=[('cross_entropy', loss)])
 
@@ -105,17 +92,16 @@ def train(config):
                             for (grad, var) in zip(gradients, caption_model.trainable_variables)
                             if grad is not None)
 
-        callbacks.on_epoch_end(epoch, logs=logs)
-        print('Epoch {} :>: Loss {:.4f}'.format(epoch + 1, loss))
+        print('Epoch {} :>: Loss {:.4f}'.format(epoch + 1, loss.numpy()))
         print('Time taken for 1 epoch {} secs\n'.format(time.time() - start))
-        train_gen.on_epoch_end()
 
-    callbacks.on_train_end(logs=logs)
-    hist_obj = None
-    for cb in callbacks:
-        if isinstance(cb, tf.keras.callbacks.History):
-            hist_obj = cb
-    assert hist_obj is not None
+        # Monitor loss in order to save model
+        if loss.numpy() < loss_monitor or epoch == 0:
+            caption_model.save(run_path)
+        loss_monitor = loss.numpy()
+        print(type(loss_monitor))
+
+        train_gen.on_epoch_end()
 
 if __name__ == "__main__":
     print('<Train>')
