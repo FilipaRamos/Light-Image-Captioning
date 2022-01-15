@@ -11,10 +11,13 @@ from nltk.translate.bleu_score import corpus_bleu
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-def eval_model(model, descs, images, tokenizer, max_length):
+def eval_model(model, cfg, descs, images, tokenizer, max_length):
     realset, predset = list(), list()
     for key, desc_l in descs.items():
-        pred = utils.generate_desc(model, tokenizer, images[key], max_length)
+        if cfg.split('_')[2] == 'transformer':
+            pred = utils.generate_transformer_desc(model, tokenizer, images[key], max_length)
+        else:
+            pred = utils.generate_desc(model, tokenizer, images[key], max_length)
         references = [d.split() for d in desc_l]
         realset.append(references)
         predset.append(pred.split())
@@ -47,24 +50,33 @@ def eval_all_checkpoints(checkpoints_dir, descriptions_test, features_test, toke
     print("b3=%d" % best_bleu[2])
     print("b4=%d" % best_bleu[3])
 
-def eval_checkpoint(checkpoints_dir, dir, descriptions_test, features_test, tokenizer, max_length):
+def eval_checkpoint(checkpoints_dir, dir, descriptions_test, features_test, tokenizer, max_length, load_weights=True):
     checkpoint = os.path.join(checkpoints_dir, dir)
-        
-    caption_model = load_model(checkpoint)
-    eval_model(caption_model, descriptions_test, features_test, tokenizer, max_length)
+    
+    if load_weights:
+        file = os.path.join(checkpoint, dir + '.h5')
+        caption_model = utils.load_model(dir)
+        caption_model.load_weights(file)
+    else:
+        caption_model = load_model(checkpoint)
+    eval_model(caption_model, dir, descriptions_test, features_test, tokenizer, max_length)
 
-def eval():
+def eval(config):
+    cur_dir = os.path.dirname(os.path.abspath(__file__))
+    cfg_file = os.path.join(cur_dir, 'config/' + config + '.cfg')
+    cfg =  utils.load_cfg(cfg_file)['default']
     # Prepare data
-    _, _, descriptions_test, features_test, tokenizer, vocab_size, max_length = utils.prepare()
+    _, _, descriptions_test, features_test, tokenizer, vocab_size, max_length = utils.prepare(cfg)
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     checkpoints = os.path.join(cur_dir, 'checkpoints')
     
-    if sys.argv[1] == 'all':
-        eval_all_checkpoints(checkpoints, descriptions_test, features_test, tokenizer, max_length)
-    else:
-        eval_checkpoint(checkpoints, sys.argv[1], descriptions_test, features_test, tokenizer, max_length)
+    # Depecrated
+    #if sys.argv[1] == 'all':
+    #    eval_all_checkpoints(checkpoints, descriptions_test, features_test, tokenizer, max_length)
+    #else:
+    eval_checkpoint(checkpoints, sys.argv[1], descriptions_test, features_test, tokenizer, max_length, sys.argv[2])
 
 if __name__ == "__main__":
     print('<Eval>')
-    eval()
+    eval(sys.argv[1])
     print('<Done>')

@@ -3,6 +3,8 @@ import pickle
 import configparser
 import numpy as np
 
+import model
+
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -103,34 +105,40 @@ def create_all_seqs(tokenizer, max_length, data, images, vocab_size):
 
 def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
     ''' Training Sequences
-        Input:
-        1. img startseq
-        2. img startseq, bird
-        3. img startseq, bird, flying
-        4. img startseq, bird, flying, at
-        5. img startseq, bird, flying, at, sea
-        6. img startseq, bird, flying, at, sea, endseq
+        Input:                                          Label:
+        1. img startseq                                 1. bird    
+        2. img startseq, bird                           2. flying
+        3. img startseq, bird, flying                   3. at
+        4. img startseq, bird, flying, at               4. sea
+        5. img startseq, bird, flying, at, sea          5. endseq
+        6. img startseq, bird, flying, at, sea, endseq  6. -
         Shape of a sample:
         (batch_size, max_length, vocab_size)
+        -1 since the last 
          '''
     x1, x2, y = list(), list(), list()
     for key, desc_l in data.items():
         for desc in desc_l:
-            # encode with tokenizer
+            #print('ORIGINAl DESC>', desc)
+            # Encode with tokenizer
             seq = tokenizer.texts_to_sequences([desc])[0]
-            # split into pairs
-            desc_label = np.zeros((max_length, vocab_size))
-            size = max_length - len(seq)
-            desc_label_idx = size
-            for i in range(1, len(seq)):
-                in_seq, out_seq = seq[:i], seq[i]
-                in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
-                out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
-                desc_label[desc_label_idx + i, :] = out_seq
 
-            x1.append(images[key][0])
-            x2.append(in_seq)
-            y.append(desc_label)
+            for i in range(1, len(seq)):
+                # Shape label
+                desc_label = np.zeros((max_length, vocab_size))
+
+                in_seq, out_seq = seq[:i], seq[i]
+                #print('Start>{}, End>{}'.format(in_seq, out_seq))
+                in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
+                #print('Padded In Seq>{}, Size>{}'.format(in_seq, len(in_seq)))
+
+                out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
+                desc_label[-1, :] = out_seq
+                assert np.sum(desc_label[-1, :]) == 1
+
+                x1.append(images[key][0])
+                x2.append(in_seq)
+                y.append(desc_label)
     return np.array(x1), np.array(x2), np.array(y)
 
 def create_seq(tokenizer, max_length, desc_l, image, vocab_size):
@@ -175,12 +183,46 @@ def generate_desc(model, tokenizer, img, max_length):
             break
     return input
 
-def prepare():
+def generate_transformer_desc(model, tokenizer, img, max_length):
+    input = 'startseq'
+    for i in range(max_length):
+        seq = tokenizer.texts_to_sequences([input])[0]
+        seq = pad_sequences([seq], maxlen=max_length)
+
+        # Preds will be (1, max_length, vocab_size)
+        pred = model.predict([img, seq], verbose=0)
+        pred = pred[:, -1:, :]
+        pred = np.argmax(pred)
+        word = word_by_id(pred, tokenizer)
+
+        if word is None:
+            break
+        input += ' ' + word
+        if word == 'endseq':
+            break
+    return input
+
+def load_model(config):
+    cur_dir = os.path.dirname(os.path.abspath(__file__))
+    cfg_file = os.path.join(cur_dir, 'config/' + config + '.cfg')
+    cfg = load_cfg(cfg_file)['default']
+    file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
+    
+    f_shape = int(cfg['f_shape'])
+    vocab_size = int(cfg['vocab_size'])
+    max_length = int(cfg['max_len'])
+    if cfg['model'] == 'simple':
+        caption_model = model.simple_caption_model(f_shape, vocab_size, max_length, file_model)
+    elif cfg['model'] == 'transformer':
+        caption_model = model.transformer_caption_model(f_shape, vocab_size, max_length, file_model)
+    return caption_model
+
+def prepare(cfg):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     file_train = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
     file_test = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
     file_d = os.path.join(cur_dir, 'data/descriptions.txt')
-    file_img = os.path.join(cur_dir, 'data/features.pkl')
+    file_img = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '.pkl')
     file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
 
     # Train
@@ -208,5 +250,30 @@ def prepare():
 
     return descriptions, features, descriptions_test, features_test, tokenizer, vocab_size, maxlen
 
+def check_label_correctness():
+    cur_dir = os.path.dirname(os.path.abspath(__file__))
+    file_train = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
+    file_test = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
+    file_d = os.path.join(cur_dir, 'data/descriptions.txt')
+    file_img = os.path.join(cur_dir, 'data/features.pkl')
+    file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
+
+    # Train
+    data = load_set(file_train)
+    print('Train dataset>%d' % len(data))
+    descriptions = load_clean_descriptions(file_d, data)
+    print("Train descriptions>%d" % len(descriptions))
+    features = load_img_features(file_img, data)
+    print("Train features size>%d" % len(features))
+
+    tokenizer = set_tokenizer(descriptions)
+    save_tokenizer(tokenizer, file_tk)
+    vocab_size = len(tokenizer.word_index) + 1
+    print('Vocab size>%d' % vocab_size)
+    maxlen = max_length(descriptions)
+    print('Max length>%d' % maxlen)
+
+    create_tensor_seqs(tokenizer, maxlen, descriptions, features, vocab_size)
+
 if __name__ == "__main__":
-    prepare()
+    check_label_correctness()

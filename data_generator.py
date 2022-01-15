@@ -8,11 +8,14 @@ import utils
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
 class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, vocab_size, max_length, model, batch_size=2, shuffle=True, train=True, load=True):
+    def __init__(self, vocab_size, max_length, cfg='flickr_inception_transformer', shuffle=True, train=True, load=True):
         self.descs_file = os.path.join(cur_dir, 'data/descriptions.txt')
-        self.img_file = os.path.join(cur_dir, 'data/features.pkl')
         tk_file = os.path.join(cur_dir, 'data/tokenizer.pkl')
         
+        cfg_file = os.path.join(cur_dir, 'config/' + cfg + '.cfg')
+        self.cfg =  utils.load_cfg(cfg_file)['default']
+        self.img_file = os.path.join(cur_dir, 'data/features_' + self.cfg['backbone'] + '.pkl')
+
         if train:
             file = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
         else:
@@ -20,7 +23,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.ids = utils.load_set(file)
         self.maxlen = max_length
 
-        self.batch_size = batch_size
+        self.batch_size = int(self.cfg['batch_size'])
         self.shuffle = shuffle
 
         if train and not load:
@@ -29,7 +32,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         else:
             self.tokenizer = pickle.load(open(tk_file, 'rb'))
 
-        self.model = model
+        self.model = self.cfg['model']
         self.vocab_size = vocab_size
         self.on_epoch_end()
 
@@ -55,6 +58,7 @@ class DataGenerator(tf.keras.utils.Sequence):
         ids = [tmp[k] for k in indexes]
 
         x1, x2, y = self.__data_generation(ids)
+        #print('NEW SHAPES: x1>{}, x2>{}, y>{}'.format(x1.shape, x2.shape, y.shape))
         return x1, x2, y
 
     def get_batch_size(self):
