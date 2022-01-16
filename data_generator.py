@@ -14,7 +14,14 @@ class DataGenerator(tf.keras.utils.Sequence):
         
         cfg_file = os.path.join(cur_dir, 'config/' + cfg + '.cfg')
         self.cfg =  utils.load_cfg(cfg_file)['default']
-        self.img_file = os.path.join(cur_dir, 'data/features_' + self.cfg['backbone'] + '.pkl')
+        # Transformer2d
+        if any(char.isdigit() for char in self.cfg['model']):
+            self.img_file = os.path.join(cur_dir, 'data/features_' + self.cfg['backbone'] + '2d.pkl')
+        else:
+            self.img_file = os.path.join(cur_dir, 'data/features_' + self.cfg['backbone'] + '.pkl')
+
+        self.batch_size = int(self.cfg['batch_size'])
+        self.shuffle = shuffle
 
         if train:
             file = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
@@ -22,9 +29,6 @@ class DataGenerator(tf.keras.utils.Sequence):
             file = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
         self.ids = utils.load_set(file)
         self.maxlen = max_length
-
-        self.batch_size = int(self.cfg['batch_size'])
-        self.shuffle = shuffle
 
         if train and not load:
             self.tokenizer = utils.set_tokenizer(self.ids)
@@ -44,7 +48,7 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __data_generation(self, ids_tmp):
         features = utils.load_img_features(self.img_file, ids_tmp)
         descs = utils.load_clean_descriptions(self.descs_file, ids_tmp)
-        if self.model == 'transformer':
+        if self.model == 'transformer' or self.model == 'transformer2d':
             return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
         else:
             return utils.create_all_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
@@ -58,6 +62,8 @@ class DataGenerator(tf.keras.utils.Sequence):
         ids = [tmp[k] for k in indexes]
 
         x1, x2, y = self.__data_generation(ids)
+        if len(x1.shape) > 3:
+            x1 = np.reshape(x1, (x1.shape[0], -1, x1.shape[3]))
         #print('NEW SHAPES: x1>{}, x2>{}, y>{}'.format(x1.shape, x2.shape, y.shape))
         return x1, x2, y
 

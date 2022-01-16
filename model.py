@@ -22,7 +22,7 @@ def create_masks(seq=None, size=None):
 
 def simple_caption_model(cfg, f_shape, vocab_size, max_length, file):
     # Config
-    EMBED_DIM = cfg['EMBED_DIM']
+    EMBED_DIM = int(cfg['EMBED_DIM'])
     # Feature Extraction
     input1 = Input(shape=f_shape)
     f1 = Dropout(0.5)(input1)
@@ -48,9 +48,9 @@ def simple_caption_model(cfg, f_shape, vocab_size, max_length, file):
 
 def transformer_caption_model(cfg, f_shape, vocab_size, max_length, file):
     # Config
-    EMBED_DIM = cfg['EMBED_DIM']
-    NUM_HEADS = cfg['NUM_HEADS']
-    LATENT_DIM = cfg['LATENT_DIM']
+    EMBED_DIM = int(cfg['EMBED_DIM'])
+    NUM_HEADS = int(cfg['NUM_HEADS'])
+    LATENT_DIM = int(cfg['LATENT_DIM'])
     # Image Feature Extraction
     f_input = Input(shape=f_shape)
     f_out = layers.FeatureEncoder(EMBED_DIM)(f_input)

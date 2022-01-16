@@ -4,7 +4,7 @@ import tensorflow as tf
 
 import tensorflow.keras.layers as layers
 
-from tensorflow.keras import Sequential
+from tensorflow.keras import Sequential, Model
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Dropout
 
@@ -96,7 +96,7 @@ class CustomMultiHeadAttention(layers.Layer):
         att_weights = tf.nn.softmax(scaled_att_logits, axis=-1)
         # out: (batch_size, max_length(q), depth_v)
         out = tf.matmul(att_weights, v)
-        return out, att_weights      
+        return out, att_weights
 
     def split_heads(self, x, batch_size):
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
@@ -117,6 +117,7 @@ class CustomMultiHeadAttention(layers.Layer):
         # out: (batch_size, max_length(q, k, v), num_heads, depth)
         scaled_att, att_weights = self.scaled_prod_att(q, k, v, mask)
         scaled_att = tf.transpose(scaled_att, perm=[0, 2, 1, 3])
+
         # out: (batch_size, max_length(q), embed_dim)
         concat_att = tf.reshape(scaled_att, (batch_size, -1, self.embed_dim))
 
@@ -174,8 +175,8 @@ class DecoderLayer(layers.Layer):
         self.mha2 = CustomMultiHeadAttention(num_heads, embed_dim)
 
         self.ffn = Sequential([
-            Dense(embed_dim, activation='relu'), 
-            Dense(dff),
+            Dense(dff, activation='relu'), 
+            Dense(embed_dim),
         ])
 
         self.norm1 = layers.LayerNormalization(epsilon=1e-6)
@@ -187,17 +188,17 @@ class DecoderLayer(layers.Layer):
         self.dropout3 = Dropout(rate)
 
     def call(self, x, enc_out, training, look_ahead_mask=None, padding_mask=None):
-        # out: (batch_size, seq_len, embed_dim)
+        # out: (batch_size, max_length, embed_dim)
         att1, att1_weights = self.mha1(x, x, x, look_ahead_mask)
         att1 = self.dropout1(att1, training=training)
         out1 = self.norm1(att1 + x)
 
-        # out: (batch_size, seq_len, embed_dim)
+        # out: (batch_size, max_length, embed_dim)
         att2, att2_weights = self.mha2(enc_out, enc_out, out1, padding_mask)
         att2 = self.dropout2(att2, training=training)
         out2 = self.norm2(att2 + out1)
 
-        # out: (batch_size, seq_len, embed_dim)
+        # out: (batch_size, max_length, embed_dim)
         ffn_out = self.ffn(out2)
         ffn_out = self.dropout3(ffn_out, training=training)
         out3 = self.norm3(ffn_out + out2)
@@ -290,12 +291,10 @@ class Decoder(layers.Layer):
     def __init__(self, num_layers, embed_dim, num_heads, dff, vocab_size, max_length, rate=0.1):
         super(Decoder, self).__init__()
         self.num_layers = num_layers
-        self.embed_dim = embed_dim
-
         self.embedding = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
         
         self.dec_layers = [
-            DecoderLayer(self.embed_dim, num_heads, dff, rate) for _ in range(self.num_layers)
+            DecoderLayer(embed_dim, num_heads, dff, rate) for _ in range(self.num_layers)
         ]
         self.dropout = Dropout(rate)
 
@@ -310,19 +309,19 @@ class Decoder(layers.Layer):
 
         att_weights = {}
         for i in range(self.num_layers):
-            x, att1_weights, att2_weights = self.dec_layers(x, enc_out, training, look_ahead_mask, padding_mask)
+            x, att1_weights, att2_weights = self.dec_layers[i](x, enc_out, training, look_ahead_mask, padding_mask)
 
             att_weights['decoder_layer{}_att1'.format(i+1)] = att1_weights
             att_weights['decoder_layer{}_att2'.format(i+1)] = att2_weights
 
         return x, att_weights
 
-class TransformerWrapper(layers.Layer):
+class TransformerWrapper(Model):
     def __init__(self, num_layers, embed_dim, num_heads, dff, row, col, vocab_size, max_length, rate=0.1):
         super(TransformerWrapper, self).__init__()
         self.encoder = Encoder(num_layers, embed_dim, num_heads, dff, row, col, rate)
         self.decoder = Decoder(num_layers, embed_dim, num_layers, dff, vocab_size, max_length, rate)
-        self.dense = Dense(vocab_size, activation="softmax")
+        self.dense = Dense(vocab_size)
 
     def call(self, features, descs, training, look_ahead_mask=None, dec_padding_mask=None, enc_padding_mask=None):
         # out: (batch_size, max_length, embed_dim)

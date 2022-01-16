@@ -57,5 +57,9 @@ if __name__ == "__main__":
 
     features = feature_extraction(in_dir, cfg)
     print("Finished extracting features>%s" % len(features))
-    pickle.dump(features, open(os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '.pkl'), 'wb'))
+    if any(char.isdigit() for char in cfg['model']):
+        features_path = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '2d.pkl')
+    else:
+        features_path = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '.pkl')
+    pickle.dump(features, open(features_path, 'wb'))
     print('<Done>')

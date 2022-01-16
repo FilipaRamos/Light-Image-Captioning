@@ -4,6 +4,7 @@ import configparser
 import numpy as np
 
 import model
+import layers
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -106,11 +107,11 @@ def create_all_seqs(tokenizer, max_length, data, images, vocab_size):
 def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
     ''' Training Sequences
         Input:                                          Label:
-        1. img startseq                                 1. bird    
-        2. img startseq, bird                           2. flying
-        3. img startseq, bird, flying                   3. at
-        4. img startseq, bird, flying, at               4. sea
-        5. img startseq, bird, flying, at, sea          5. endseq
+        1. img startseq                                 1. previous seq + bird    
+        2. img startseq, bird                           2. previous seq + flying
+        3. img startseq, bird, flying                   3. previous seq + at
+        4. img startseq, bird, flying, at               4. previous seq + sea
+        5. img startseq, bird, flying, at, sea          5. previous seq + endseq
         6. img startseq, bird, flying, at, sea, endseq  6. -
         Shape of a sample:
         (batch_size, max_length, vocab_size)
@@ -125,16 +126,17 @@ def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
 
             for i in range(1, len(seq)):
                 # Shape label
-                desc_label = np.zeros((max_length, vocab_size))
+                #desc_label = np.zeros((max_length, vocab_size))
 
-                in_seq, out_seq = seq[:i], seq[i]
+                in_seq, out_seq = seq[:i], seq[1:i+1]
                 #print('Start>{}, End>{}'.format(in_seq, out_seq))
                 in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
                 #print('Padded In Seq>{}, Size>{}'.format(in_seq, len(in_seq)))
 
-                out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
-                desc_label[-1, :] = out_seq
-                assert np.sum(desc_label[-1, :]) == 1
+                #out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
+                #desc_label[-1, :] = out_seq
+                #assert np.sum(desc_label[-1, :]) == 1
+                desc_label = pad_sequences([out_seq], maxlen=max_length)[0]
 
                 x1.append(images[key][0])
                 x2.append(in_seq)
@@ -202,19 +204,60 @@ def generate_transformer_desc(model, tokenizer, img, max_length):
             break
     return input
 
+def generate_transformer2d_desc(md, tokenizer, img, max_length):
+    import tensorflow as tf
+    input = 'startseq'
+    # Reshape img features
+    img = tf.reshape(img, (img.shape[0], -1, img.shape[3]))
+    
+    for i in range(max_length):
+        seq = tokenizer.texts_to_sequences([input])[0]
+        seq = pad_sequences([seq], maxlen=max_length)
+
+        # Preds will be (1, max_length, vocab_size)
+        pad_mask, look_mask = model.create_masks(seq, max_length)
+        comb_mask = tf.maximum(pad_mask, look_mask)
+
+        pred, att_weights = md(img, seq, False, comb_mask)
+        # Last row is the predicted next word
+        pred = pred[:, -1:, :]
+        pred = np.argmax(pred)
+        word = word_by_id(pred, tokenizer)
+
+        if word is None:
+            break
+
+        input += ' ' + word
+        
+        if word == 'endseq':
+            break
+    return input, att_weights
+
 def load_model(config):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     cfg_file = os.path.join(cur_dir, 'config/' + config + '.cfg')
     cfg = load_cfg(cfg_file)['default']
     file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
     
-    f_shape = int(cfg['f_shape'])
     vocab_size = int(cfg['vocab_size'])
     max_length = int(cfg['max_len'])
     if cfg['model'] == 'simple':
+        f_shape = int(cfg['f_shape'])
         caption_model = model.simple_caption_model(f_shape, vocab_size, max_length, file_model)
     elif cfg['model'] == 'transformer':
+        f_shape = int(cfg['f_shape'])
         caption_model = model.transformer_caption_model(f_shape, vocab_size, max_length, file_model)
+    elif cfg['model'] == 'transformer2d':
+        caption_model = layers.TransformerWrapper(
+            int(cfg['NUM_LAYERS']), 
+            int(cfg['EMBED_DIM']), 
+            int(cfg['NUM_HEADS']), 
+            int(cfg['DFF']), 
+            int(cfg['ROW']), 
+            int(cfg['COL']), 
+            vocab_size, 
+            max_length
+        )
     return caption_model
 
 def prepare(cfg):
@@ -222,8 +265,12 @@ def prepare(cfg):
     file_train = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
     file_test = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
     file_d = os.path.join(cur_dir, 'data/descriptions.txt')
-    file_img = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '.pkl')
     file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
+
+    if any(char.isdigit() for char in cfg['model']):
+        file_img = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '2d.pkl')
+    else:
+        file_img = os.path.join(cur_dir, 'data/features_' + cfg['backbone'] + '.pkl')
 
     # Train
     data = load_set(file_train)

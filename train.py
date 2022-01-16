@@ -12,7 +12,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.utils import Progbar
 from tensorflow.keras.callbacks import ModelCheckpoint
-from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.losses import CategoricalCrossentropy, SparseCategoricalCrossentropy
 
 def prep_train(config):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +25,8 @@ def prep_train(config):
     cfg =  utils.load_cfg(cfg_file)['default']
     _, _, _, _, _, vocab_size, max_length = utils.prepare(cfg)
     file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
-    f_shape = (int(cfg['f_shape']),)
+    if cfg['model'] == 'simple' or cfg['model'] == 'transformer':
+        f_shape = (int(cfg['f_shape']),)
 
     run = cfg['dataset'] + '_' + cfg['backbone'] + '_' + cfg['model']
     run_path = os.path.join(checkpoints, run)
@@ -70,6 +71,7 @@ def loss_function(loss_obj, real, pred):
     batch_size = loss_.shape[0]
     return tf.reduce_sum(loss_) / batch_size
 
+# Labels are the problem? Should be length=34: [0, 0, 0, 4, 6, 1234, 45...] ?
 def loss_function2d(loss_obj, real, pred):
     mask = tf.math.logical_not(tf.math.equal(real, 0))
     loss_ = loss_obj(real, pred)
@@ -147,7 +149,7 @@ def train2D(config):
     )
     optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
                                     epsilon=1e-9)
-    loss_object = CategoricalCrossentropy(reduction='none')
+    loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
     loss_monitor = 0
 
     train_gen = data_gen.DataGenerator(vocab_size, max_length, config)
@@ -166,7 +168,7 @@ def train2D(config):
             
             with tf.GradientTape() as tape:
                 preds, _ = caption_model(f_tensor, seq_tensor, True, comb_mask)
-                loss = loss_function(loss_object, target, preds)
+                loss = loss_function2d(loss_object, target, preds)
                 
                 pb_i.add(batch_size, values=[('cross_entropy', loss)])
 
