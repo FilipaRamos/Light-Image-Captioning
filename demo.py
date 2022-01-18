@@ -60,23 +60,25 @@ class Demo():
         elif self.cfg['model'] == 'transformer':
             return utils.generate_transformer_desc(self.model, self.tokenizer, features, self.max_length)
         elif self.cfg['model'] == 'transformer2d':
+            features = np.reshape(features, (features.shape[0], -1, features.shape[3]))
             return self.generate_caption2d(features)
 
     def generate_caption2d(self, features):
         import tensorflow as tf    
         caption_model = utils.load_model(self.cfg_name)
         test_gen = data_gen.DataGenerator(self.vocab_size, self.max_length, self.cfg_name, train=False)
-        num_samples = int(test_gen.get_max_count())
 
         # Need to build model before loading weights
-        f_tensor, seq_tensor, target = test_gen.__getitem__(0)
-        pad_mask, look_mask = model.create_masks(seq_tensor, self.max_length)
+        f_tensor, seq_tensor = test_gen.__getitem__(0)
+        pad_mask, look_mask = model.create_masks(seq_tensor)
         comb_mask = tf.maximum(pad_mask, look_mask)
 
         _, _ = caption_model(f_tensor, seq_tensor, False, comb_mask)
+        tmp_file = self.chk_file.split('/')[-1]
+        print('Loading {} weights...'.format(tmp_file))
         caption_model.load_weights(self.chk_file)
         # # # Built and loaded weights
-        pred, _ = utils.generate_transformer2d_desc(caption_model, self.tokenizer, features, self.max_length)
+        pred, _, _ = utils.generate_transformer2d_desc(caption_model, self.tokenizer, features, self.max_length)
         return pred
 
 if __name__ == "__main__":
@@ -95,6 +97,6 @@ if __name__ == "__main__":
         file = os.path.join(base_path, file)
     print('<File>:%s' % file)
     caption = dm.generate_caption(file)
-    f_caption = utils.array_to_str(np.array(caption.split())[1:-1])
-    print('<Caption>:%s' % f_caption)
+    #f_caption = utils.array_to_str(np.array(caption.split())[1:-1])
+    print('<Caption>:%s' % caption)
     print('<Done>')

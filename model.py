@@ -12,13 +12,12 @@ from tensorflow.keras.layers import Add
 from tensorflow.keras import Model
 from tensorflow.keras.utils import plot_model
 
-def create_masks(seq=None, size=None):
-    mask = None
-    if seq is not None: # Padding mask
-        seq = tf.cast(tf.math.equal(seq, 0), tf.float32)
-    if size is not None: # Look ahead mask
-        mask = 1 - tf.linalg.band_part(tf.ones((size, size)), -1, 0)
-    return seq[:, tf.newaxis, tf.newaxis, :], mask  # (batch_size, 1, 1, max_length), # (max_length, max_length)
+def create_masks(seq):
+    # Padding Mask
+    seq = tf.cast(tf.math.equal(seq, 0), tf.float32)
+    # Look ahead Mask
+    mask = 1 - tf.linalg.band_part(tf.ones((tf.shape(seq)[1], tf.shape(seq)[1])), -1, 0)
+    return seq[:, tf.newaxis, tf.newaxis, :], mask  # (batch_size, 1, 1, seq_len), # (seq_len, seq_len)
 
 def simple_caption_model(cfg, f_shape, vocab_size, max_length, file):
     # Config

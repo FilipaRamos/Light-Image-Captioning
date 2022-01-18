@@ -55,9 +55,19 @@ class AnglePositionEmbedding():
         angle_row[:, 0::2] = np.sin(angle_row[:, 0::2])
         angle_row[:, 1::2] = np.cos(angle_row[:, 1::2])
         angle_col[:, 0::2] = np.sin(angle_col[:, 0::2])
-        angle_col[:, 1::2] = np.cos(angle_col[:, 1::2]) 
+        angle_col[:, 1::2] = np.cos(angle_col[:, 1::2])
 
         pos_encoding = np.concatenate([angle_row, angle_col], axis=1)[np.newaxis, ...]
+        return tf.cast(pos_encoding, dtype=tf.float32)
+
+    def pos_encoding1d(self, position, d_model):
+        angle_rads = self.get_angles(np.arange(position)[:, np.newaxis],
+                                np.arange(d_model)[np.newaxis, :],
+                                d_model)
+
+        angle_rads[:, 0::2] = np.sin(angle_rads[:, 0::2])
+        angle_rads[:, 1::2] = np.cos(angle_rads[:, 1::2])
+        pos_encoding = angle_rads[np.newaxis, ...]
         return tf.cast(pos_encoding, dtype=tf.float32)
 
 class FeatureEncoder(layers.Layer):
@@ -69,6 +79,20 @@ class FeatureEncoder(layers.Layer):
     def call(self, x, training):
         x = self.dropout(x, training=training)
         return self.dense(x)
+
+def scaled_prod_att(q, k, v, mask=None):
+    # out: (batch_size, max_length(q), seq_len_k)
+    matmul_qk = tf.matmul(q, k, transpose_b=True)
+    dk = tf.cast(tf.shape(k)[-1], tf.float32)
+    scaled_att_logits = matmul_qk / tf.math.sqrt(dk)
+
+    if mask is not None:
+        scaled_att_logits += (mask * -1e9)
+
+    att_weights = tf.nn.softmax(scaled_att_logits, axis=-1)
+    # out: (batch_size, max_length(q), depth_v)
+    out = tf.matmul(att_weights, v)
+    return out, att_weights
 
 class CustomMultiHeadAttention(layers.Layer):
     def __init__(self, num_heads, embed_dim):
@@ -83,20 +107,6 @@ class CustomMultiHeadAttention(layers.Layer):
         self.k = Dense(self.embed_dim)
         self.v = Dense(self.embed_dim)
         self.dense = Dense(self.embed_dim)
-
-    def scaled_prod_att(self, q, k, v, mask=None):
-        # out: (batch_size, max_length(q), seq_len_k)
-        matmul_qk = tf.matmul(q, k, transpose_b=True)
-        dk = tf.cast(tf.shape(k)[-1], tf.float32)
-        scaled_att_logits = matmul_qk / tf.math.sqrt(dk)
-
-        if mask is not None:
-            scaled_att_logits += (mask * -1e9)
-
-        att_weights = tf.nn.softmax(scaled_att_logits, axis=-1)
-        # out: (batch_size, max_length(q), depth_v)
-        out = tf.matmul(att_weights, v)
-        return out, att_weights
 
     def split_heads(self, x, batch_size):
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
@@ -115,7 +125,7 @@ class CustomMultiHeadAttention(layers.Layer):
         v = self.split_heads(v, batch_size)
 
         # out: (batch_size, max_length(q, k, v), num_heads, depth)
-        scaled_att, att_weights = self.scaled_prod_att(q, k, v, mask)
+        scaled_att, att_weights = scaled_prod_att(q, k, v, mask)
         scaled_att = tf.transpose(scaled_att, perm=[0, 2, 1, 3])
 
         # out: (batch_size, max_length(q), embed_dim)
@@ -275,10 +285,10 @@ class Encoder(layers.Layer):
         self.dropout = Dropout(rate)
 
     def call(self, x, training, mask=None):
-        max_length = tf.shape(x)[1]
+        seq_length = tf.shape(x)[1]
         # 2D Embedding out: (batch_size, max_length(HxW), embed_dim)
         x = self.embedding(x)
-        x += self.pos_encoding[:, :max_length, :]
+        x += self.pos_encoding[:, :seq_length, :]
 
         x = self.dropout(x, training=training)
         for i in range(self.num_layers):
@@ -291,7 +301,10 @@ class Decoder(layers.Layer):
     def __init__(self, num_layers, embed_dim, num_heads, dff, vocab_size, max_length, rate=0.1):
         super(Decoder, self).__init__()
         self.num_layers = num_layers
-        self.embedding = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
+        self.embed_dim = embed_dim
+        #self.embedding = TokenAndPositionEmbedding(max_length, vocab_size, embed_dim)
+        self.embedding = layers.Embedding(vocab_size, embed_dim)
+        self.pos_encoding = AnglePositionEmbedding(None, None, embed_dim).pos_encoding1d(vocab_size, embed_dim)
         
         self.dec_layers = [
             DecoderLayer(embed_dim, num_heads, dff, rate) for _ in range(self.num_layers)
@@ -299,12 +312,12 @@ class Decoder(layers.Layer):
         self.dropout = Dropout(rate)
 
     def call(self, x, enc_out, training, look_ahead_mask=None, padding_mask=None):
-        max_length = tf.shape(x)[1]
+        seq_length = tf.shape(x)[1]
 
         # out: (batch_size, max_length, embed_dim)
         x = self.embedding(x)
-        x = x[:, :max_length, :]
-
+        x *= tf.math.sqrt(tf.cast(self.embed_dim, tf.float32))
+        x += self.pos_encoding[:, :seq_length, :]
         x = self.dropout(x, training=training)
 
         att_weights = {}
@@ -320,7 +333,7 @@ class TransformerWrapper(Model):
     def __init__(self, num_layers, embed_dim, num_heads, dff, row, col, vocab_size, max_length, rate=0.1):
         super(TransformerWrapper, self).__init__()
         self.encoder = Encoder(num_layers, embed_dim, num_heads, dff, row, col, rate)
-        self.decoder = Decoder(num_layers, embed_dim, num_layers, dff, vocab_size, max_length, rate)
+        self.decoder = Decoder(num_layers, embed_dim, num_heads, dff, vocab_size, vocab_size, rate)
         self.dense = Dense(vocab_size)
 
     def call(self, features, descs, training, look_ahead_mask=None, dec_padding_mask=None, enc_padding_mask=None):

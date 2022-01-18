@@ -8,7 +8,7 @@ import utils
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
 class DataGenerator(tf.keras.utils.Sequence):
-    def __init__(self, vocab_size, max_length, cfg='flickr_inception_transformer', shuffle=True, train=True, load=True):
+    def __init__(self, vocab_size, max_length, cfg='flickr_inception_transformer', shuffle=True, train=True, load=False):
         self.descs_file = os.path.join(cur_dir, 'data/descriptions.txt')
         tk_file = os.path.join(cur_dir, 'data/tokenizer.pkl')
         
@@ -31,7 +31,8 @@ class DataGenerator(tf.keras.utils.Sequence):
         self.maxlen = max_length
 
         if train and not load:
-            self.tokenizer = utils.set_tokenizer(self.ids)
+            descs = utils.load_clean_descriptions(self.descs_file, self.ids)
+            self.tokenizer = utils.set_tokenizer(descs)
             utils.save_tokenizer(self.tokenizer, tk_file)
         else:
             self.tokenizer = pickle.load(open(tk_file, 'rb'))
@@ -49,7 +50,8 @@ class DataGenerator(tf.keras.utils.Sequence):
         features = utils.load_img_features(self.img_file, ids_tmp)
         descs = utils.load_clean_descriptions(self.descs_file, ids_tmp)
         if self.model == 'transformer' or self.model == 'transformer2d':
-            return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
+            #return utils.create_tensor_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
+            return utils.create_tensor_seqs_simple(self.tokenizer, self.maxlen, descs, features)
         else:
             return utils.create_all_seqs(self.tokenizer, self.maxlen, descs, features, self.vocab_size)
 
@@ -61,11 +63,13 @@ class DataGenerator(tf.keras.utils.Sequence):
         tmp = list(self.ids)
         ids = [tmp[k] for k in indexes]
 
-        x1, x2, y = self.__data_generation(ids)
+        #x1, x2, y = self.__data_generation(ids)
+        x1, x2 = self.__data_generation(ids)
         if len(x1.shape) > 3:
             x1 = np.reshape(x1, (x1.shape[0], -1, x1.shape[3]))
         #print('NEW SHAPES: x1>{}, x2>{}, y>{}'.format(x1.shape, x2.shape, y.shape))
-        return x1, x2, y
+        #return x1, x2[:, :-1], x2[:, 1:]
+        return x1, x2
 
     def get_batch_size(self):
         return self.batch_size

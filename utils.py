@@ -27,11 +27,15 @@ def load_set(file):
     doc = load_file(file)
     data = list()
 
+    counter = 0
     for line in doc.split('\n'):
         if len(line) < 1:
             continue
+        if counter == 1000:
+            break
         img_id = line.split('.')[0]
         data.append(img_id)
+        counter += 1
     return set(data)
 
 def load_clean_descriptions(file, data):
@@ -44,7 +48,7 @@ def load_clean_descriptions(file, data):
         if img_id in data:
             if img_id not in descs:
                 descs[img_id] = list()
-            desc = 'startseq ' + ' '.join(img_desc) + ' endseq'
+            desc = '<start> ' + ' '.join(img_desc) + ' <end>'
             descs[img_id].append(desc)
     return descs
 
@@ -67,12 +71,17 @@ def array_to_str(arr):
 
 def set_tokenizer(data):
     l = to_list(data)
-    tokenizer = Tokenizer()
+    tokenizer = Tokenizer(num_words=5000,
+                          oov_token="<unk>",
+                          filters='!"#$%&()*+.,-/:;=?@[\]^_`{|}~ ')
     tokenizer.fit_on_texts(l)
+    tokenizer.word_index['<pad>'] = 0
+    tokenizer.index_word[0] = '<pad>'
     return tokenizer
 
 def save_tokenizer(tokenizer, file):
-    pickle.dump(tokenizer, open(file, 'wb'))
+    with open(file, 'wb') as handle:
+        pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 def max_length(data):
     lines = to_list(data)
@@ -120,7 +129,7 @@ def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
     x1, x2, y = list(), list(), list()
     for key, desc_l in data.items():
         for desc in desc_l:
-            #print('ORIGINAl DESC>', desc)
+            print('ORIGINAl DESC>', desc)
             # Encode with tokenizer
             seq = tokenizer.texts_to_sequences([desc])[0]
 
@@ -128,20 +137,33 @@ def create_tensor_seqs(tokenizer, max_length, data, images, vocab_size):
                 # Shape label
                 #desc_label = np.zeros((max_length, vocab_size))
 
-                in_seq, out_seq = seq[:i], seq[1:i+1]
-                #print('Start>{}, End>{}'.format(in_seq, out_seq))
-                in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
-                #print('Padded In Seq>{}, Size>{}'.format(in_seq, len(in_seq)))
+                in_seq, out_seq = seq[:i], seq[:i+1]
+                print('Start>{}, End>{}'.format(in_seq, out_seq))
+                in_seq = pad_sequences([in_seq], maxlen=max_length, padding='post')[0]
+                print('Padded In Seq>{}, Size>{}'.format(in_seq, len(in_seq)))
 
                 #out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
                 #desc_label[-1, :] = out_seq
                 #assert np.sum(desc_label[-1, :]) == 1
-                desc_label = pad_sequences([out_seq], maxlen=max_length)[0]
+                out_seq = pad_sequences([out_seq], maxlen=max_length, padding='post')[0]
+                print('Padded Out Seq>{}, Size>{}'.format(out_seq, len(out_seq)))
 
                 x1.append(images[key][0])
                 x2.append(in_seq)
-                y.append(desc_label)
+                y.append(out_seq)
     return np.array(x1), np.array(x2), np.array(y)
+
+def create_tensor_seqs_simple(tokenizer, max_length, data, images):
+    x1, x2, y = list(), list(), list()
+    for key, desc_l in data.items():
+        for desc in desc_l:
+            seq = tokenizer.texts_to_sequences([desc])
+            seq = pad_sequences(seq, maxlen=max_length, padding='post')[0]
+            #print('Padded In Seq>{}, Size>{}'.format(seq, len(seq)))
+
+            x1.append(images[key][0])
+            x2.append(seq)
+    return np.array(x1), np.array(x2)
 
 def create_seq(tokenizer, max_length, desc_l, image, vocab_size):
     x1, x2, y = list(), list(), list()
@@ -204,24 +226,26 @@ def generate_transformer_desc(model, tokenizer, img, max_length):
             break
     return input
 
-def generate_transformer2d_desc(md, tokenizer, img, max_length):
+'''def generate_transformer2d_desc(md, tokenizer, img, max_length):
     import tensorflow as tf
-    input = 'startseq'
+    input = '<start>'
     # Reshape img features
     img = tf.reshape(img, (img.shape[0], -1, img.shape[3]))
     
     for i in range(max_length):
-        seq = tokenizer.texts_to_sequences([input])[0]
-        seq = pad_sequences([seq], maxlen=max_length)
+        seq = tokenizer.texts_to_sequences([input])
+        seq = pad_sequences(seq, maxlen=max_length, padding='post')
 
         # Preds will be (1, max_length, vocab_size)
+        seq = np.array(seq)
         pad_mask, look_mask = model.create_masks(seq, max_length)
         comb_mask = tf.maximum(pad_mask, look_mask)
 
         pred, att_weights = md(img, seq, False, comb_mask)
         # Last row is the predicted next word
         pred = pred[:, -1:, :]
-        pred = np.argmax(pred)
+        pred = tf.cast(tf.argmax(pred, axis=-1), tf.int32)
+        #pred = np.argmax(pred)
         word = word_by_id(pred, tokenizer)
 
         if word is None:
@@ -229,9 +253,33 @@ def generate_transformer2d_desc(md, tokenizer, img, max_length):
 
         input += ' ' + word
         
-        if word == 'endseq':
+        if word == '<end>':
             break
-    return input, att_weights
+    return input, att_weights'''
+
+def generate_transformer2d_desc(md, tokenizer, img, max_length):
+    import tensorflow as tf
+    start_token = tokenizer.word_index['<start>']
+    end_token = tokenizer.word_index['<end>']
+    decoder_input = [start_token]
+    output = tf.expand_dims(decoder_input, 0) #tokens
+    result = [] #word list
+
+    for i in range(100):
+        pad_mask, look_mask = model.create_masks(output)
+        comb_mask = tf.maximum(pad_mask, look_mask)
+
+        predictions, attention_weights = md(img, output, False, comb_mask)
+        predictions = predictions[: ,-1:, :]  # (batch_size, 1, vocab_size)
+        predicted_id = tf.cast(tf.argmax(predictions, axis=-1), tf.int32)
+        
+        if predicted_id == end_token:
+            return result,tf.squeeze(output, axis=0), attention_weights
+        
+        result.append(tokenizer.index_word[int(predicted_id)])
+        output = tf.concat([output, predicted_id], axis=-1)
+
+    return result, tf.squeeze(output, axis=0), attention_weights
 
 def load_model(config):
     cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -302,7 +350,7 @@ def check_label_correctness():
     file_train = os.path.join(cur_dir, 'data/Flickr_8k.trainImages.txt')
     file_test = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
     file_d = os.path.join(cur_dir, 'data/descriptions.txt')
-    file_img = os.path.join(cur_dir, 'data/features.pkl')
+    file_img = os.path.join(cur_dir, 'data/features_inception2d.pkl')
     file_tk = os.path.join(cur_dir, 'data/tokenizer.pkl')
 
     # Train
@@ -320,7 +368,7 @@ def check_label_correctness():
     maxlen = max_length(descriptions)
     print('Max length>%d' % maxlen)
 
-    create_tensor_seqs(tokenizer, maxlen, descriptions, features, vocab_size)
+    #create_tensor_seqs(tokenizer, maxlen, descriptions, features, vocab_size)
 
 if __name__ == "__main__":
     check_label_correctness()

@@ -14,72 +14,65 @@ from tensorflow.keras.utils import Progbar
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.losses import CategoricalCrossentropy, SparseCategoricalCrossentropy
 
-def prep_train(config):
-    cur_dir = os.path.dirname(os.path.abspath(__file__))
-    checkpoints = os.path.join(cur_dir, 'checkpoints')
-    if len(config.split('.')) < 2:
-        cfg_file = os.path.join(cur_dir, 'config/' + config + '.cfg')
-    else:
-        cfg_file = os.path.join(cur_dir, 'config/' + config)
+#def prep_train(config):
+config = 'flickr_inception_transformer2d'
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+checkpoints = os.path.join(cur_dir, 'checkpoints')
+if len(config.split('.')) < 2:
+    cfg_file = os.path.join(cur_dir, 'config/' + config + '.cfg')
+else:
+    cfg_file = os.path.join(cur_dir, 'config/' + config)
 
-    cfg =  utils.load_cfg(cfg_file)['default']
-    _, _, _, _, _, vocab_size, max_length = utils.prepare(cfg)
-    file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
-    if cfg['model'] == 'simple' or cfg['model'] == 'transformer':
-        f_shape = (int(cfg['f_shape']),)
+cfg =  utils.load_cfg(cfg_file)['default']
+_, _, _, _, _, vocab_size, max_length = utils.prepare(cfg)
+file_model = os.path.join(cur_dir, 'checkpoints/' + cfg['model'] + '.png')
+if cfg['model'] == 'simple' or cfg['model'] == 'transformer':
+    f_shape = (int(cfg['f_shape']),)
 
-    run = cfg['dataset'] + '_' + cfg['backbone'] + '_' + cfg['model']
-    run_path = os.path.join(checkpoints, run)
-    if not os.path.exists(run_path):
-        os.mkdir(run_path)
-    run_path = os.path.join(run_path, run + '.h5')
+run = cfg['dataset'] + '_' + cfg['backbone'] + '_' + cfg['model']
+run_path = os.path.join(checkpoints, run)
+if not os.path.exists(run_path):
+    os.mkdir(run_path)
+run_path = os.path.join(run_path, run + '.h5')
 
-    if cfg['model'] == 'simple':
-        caption_model = model.simple_caption_model(
-            cfg, 
-            f_shape, 
-            vocab_size, 
-            max_length, 
-            file_model
-        )
-    elif cfg['model'] == 'transformer':
-        caption_model = model.transformer_caption_model(
-            cfg, 
-            f_shape, 
-            vocab_size, 
-            max_length, 
-            file_model
-        )
-    elif cfg['model'] == 'transformer2d':
-        caption_model = layers.TransformerWrapper(
-            int(cfg['NUM_LAYERS']), 
-            int(cfg['EMBED_DIM']), 
-            int(cfg['NUM_HEADS']), 
-            int(cfg['DFF']), 
-            int(cfg['ROW']), 
-            int(cfg['COL']), 
-            vocab_size, 
-            max_length
-        )
+if cfg['model'] == 'simple':
+    caption_model = model.simple_caption_model(
+        cfg, 
+        f_shape, 
+        vocab_size, 
+        max_length, 
+        file_model
+    )
+elif cfg['model'] == 'transformer':
+    caption_model = model.transformer_caption_model(
+        cfg, 
+        f_shape, 
+        vocab_size, 
+        max_length, 
+        file_model
+    )
+elif cfg['model'] == 'transformer2d':
+    caption_model = layers.TransformerWrapper(
+        int(cfg['NUM_LAYERS']), 
+        int(cfg['EMBED_DIM']), 
+        int(cfg['NUM_HEADS']), 
+        int(cfg['DFF']), 
+        int(cfg['ROW']), 
+        int(cfg['COL']), 
+        vocab_size, 
+        max_length
+    )
 
-    return run_path, cfg, vocab_size, max_length, caption_model
+#return run_path, cfg, vocab_size, max_length, caption_model
 
-def loss_function(loss_obj, real, pred):
+def loss_function_(loss_obj, real, pred):
     # Since the decoder generates one word at a time, only the last word matters
     # (the rest is padded)
     loss_ = loss_obj(real, pred)
     batch_size = loss_.shape[0]
     return tf.reduce_sum(loss_) / batch_size
 
-# Labels are the problem? Should be length=34: [0, 0, 0, 4, 6, 1234, 45...] ?
-def loss_function2d(loss_obj, real, pred):
-    mask = tf.math.logical_not(tf.math.equal(real, 0))
-    loss_ = loss_obj(real, pred)
-    mask = tf.cast(mask, dtype=loss_.dtype)
-    loss_ *= mask
-    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
-
-def train(config):
+'''def train(config):
     # Prepare variables
     run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
 
@@ -136,7 +129,7 @@ def train(config):
             caption_model.save_weights(run_path)
             loss_monitor = loss.numpy()
 
-        train_gen.on_epoch_end()
+        train_gen.on_epoch_end()'''
 
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
    def __init__(self, d_model, warmup_steps=4000):
@@ -150,59 +143,107 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
       arg2 = step * (self.warmup_steps ** -1.5)
       return tf.math.rsqrt(self.d_model) * tf.math.minimum(arg1, arg2)
 
-def train2D(config):
-    # Prepare variables
-    run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
+def create_padding_mask(seq):
+   seq = tf.cast(tf.math.equal(seq, 0), tf.float32)
+   return seq[:, tf.newaxis, tf.newaxis, :]  # (batch_size, 1, 1, seq_len)
 
-    '''lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                            initial_learning_rate=1e-4,
-                            decay_steps=4000,
-                            decay_rate=1.5
-    )'''
-    lr_schedule = CustomSchedule(int(cfg['EMBED_DIM']))
-    optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
-                                    epsilon=1e-9)
-    loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
-    loss_monitor = 0
+def create_look_ahead_mask(size):
+   mask = 1 - tf.linalg.band_part(tf.ones((size, size)), -1, 0)
+   return mask  # (seq_len, seq_len)
 
-    train_gen = data_gen.DataGenerator(vocab_size, max_length, config)
-    metric_name = ['cross_entropy']
-    batch_size = train_gen.get_batch_size()
-    num_samples = int(train_gen.get_max_count() / batch_size)
+def create_masks_decoder(tar):
+   look_ahead_mask = create_look_ahead_mask(tf.shape(tar)[1])
+   dec_target_padding_mask = create_padding_mask(tar)
+   combined_mask = tf.maximum(dec_target_padding_mask, look_ahead_mask)
+   return combined_mask
 
-    for epoch in range(int(cfg['epochs'])):
-        start = time.time()
-        pb_i = Progbar(num_samples, stateful_metrics=metric_name)
+#def train2D(config):
+# Prepare variables
+#run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
+
+'''lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                        initial_learning_rate=1e-4,
+                        decay_steps=4000,
+                        decay_rate=1.5
+)'''
+lr_schedule = CustomSchedule(int(cfg['EMBED_DIM']))
+optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
+                                epsilon=1e-9)
+loss_object = SparseCategoricalCrossentropy(from_logits=True, reduction='none')
+loss_monitor = 0
+
+# Labels are the problem? Should be length=34: [0, 0, 0, 4, 6, 1234, 45...] ?
+def loss_function(real, pred):
+    mask = tf.math.logical_not(tf.math.equal(real, 0))
+    loss_ = loss_object(real, pred)
+    mask = tf.cast(mask, dtype=loss_.dtype)
+    loss_ *= mask
+    return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+
+train_loss = tf.keras.metrics.Mean(name='train_loss')
+train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')    
+
+@tf.function
+def train_step(img_tensor, seq_tensor):
+    desc_in = seq_tensor[:, :-1]
+    desc_target = seq_tensor[:, 1:]
+    #dec_mask = model.create_masks(seq_tensor)
+    dec_mask = create_masks_decoder(desc_in)
+    with tf.GradientTape() as tape:
+        predictions, _ = caption_model(img_tensor, desc_in,True, dec_mask)
+        loss = loss_function(desc_target, predictions)
+
+    gradients = tape.gradient(loss, caption_model.trainable_variables)   
+    optimizer.apply_gradients(zip(gradients, caption_model.trainable_variables))
+    train_loss(loss)
+    train_accuracy(desc_target, predictions)
+
+train_gen = data_gen.DataGenerator(vocab_size, max_length, config)
+metric_name = ['cross_entropy']
+batch_size = train_gen.get_batch_size()
+num_samples = int(train_gen.get_max_count() / batch_size)
+
+for epoch in range(int(cfg['epochs'])):
+    start = time.time()
+    pb_i = Progbar(num_samples, stateful_metrics=metric_name)
+    
+    for c in range(0, num_samples, batch_size):
+        f_tensor, seq_tensor = train_gen.__getitem__(c)
+        #print('NEW SHAPES: x1>{}, x2>{}, y>{}'.format(f_tensor.shape, seq_tensor.shape, target.shape))
+        '''pad_mask, look_mask = model.create_masks(seq_tensor)
+        comb_mask = tf.maximum(pad_mask, look_mask)
         
-        for c in range(0, num_samples, batch_size):
-            f_tensor, seq_tensor, target = train_gen.__getitem__(c)
-            pad_mask, look_mask = model.create_masks(seq_tensor, max_length)
-            comb_mask = tf.maximum(pad_mask, look_mask)
+        with tf.GradientTape() as tape:
+            preds, _ = caption_model(f_tensor, seq_tensor, True, comb_mask)
+            loss = loss_function2d(loss_object, target, preds)'''
+        train_step(f_tensor, seq_tensor)
+        if c % 50 == 0:
+            print ('Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
+            epoch + 1, c, train_loss.result(), train_accuracy.result()))
+
             
-            with tf.GradientTape() as tape:
-                preds, _ = caption_model(f_tensor, seq_tensor, True, comb_mask)
-                loss = loss_function2d(loss_object, target, preds)
-                
-                pb_i.add(batch_size, values=[('cross_entropy', loss)])
+        pb_i.add(batch_size, values=[('cross_entropy', train_loss.result())])
 
-            gradients = tape.gradient(loss, caption_model.trainable_variables)
-            optimizer.apply_gradients(
-                            (grad, var)
-                            for (grad, var) in zip(gradients, caption_model.trainable_variables)
-                            if grad is not None)
+        '''gradients = tape.gradient(loss, caption_model.trainable_variables)
+        optimizer.apply_gradients(
+                        (grad, var)
+                        for (grad, var) in zip(gradients, caption_model.trainable_variables)
+                        if grad is not None)'''
 
-        print('Epoch {} :>: Loss {:.4f}'.format(epoch + 1, loss.numpy()))
-        print('Time taken for 1 epoch {} secs\n'.format(time.time() - start))
+    print ('Epoch {} Loss {:.4f} Accuracy {:.4f}'.format(epoch + 1,
+                                               train_loss.result(),
+                                               train_accuracy.result()))
+    print ('Time taken for 1 epoch: {} secs\n'.format(time.time() - start))
+    
+    # Monitor loss in order to save model
+    if train_loss.result() < loss_monitor or epoch == 0:
+        print('Saved Model Weights>...', run_path)
+        caption_model.save_weights(run_path)
+        loss_monitor = train_loss.result()
 
-        # Monitor loss in order to save model
-        if loss.numpy() < loss_monitor or epoch == 0:
-            print('Saved Model Weights>...', run_path)
-            caption_model.save_weights(run_path)
-            loss_monitor = loss.numpy()
+    train_gen.on_epoch_end()
 
-        train_gen.on_epoch_end()
-
-if __name__ == "__main__":
+'''if __name__ == "__main__":
     print('<Train>')
     m = sys.argv[1].split('_')[2]
     if any(char.isdigit() for char in m):
@@ -210,4 +251,4 @@ if __name__ == "__main__":
         train2D(sys.argv[1])
     else:
         train(sys.argv[1])
-    print('<Done>')
+    print('<Done>')'''
