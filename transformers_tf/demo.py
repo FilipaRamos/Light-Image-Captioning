@@ -5,8 +5,8 @@ import pickle
 import numpy as np
 
 import utils
-import model
-import data_generator as data_gen
+import transformers_tf.model as model
+import transformers_tf.data_generator as data_gen
 
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.preprocessing.text import Tokenizer

@@ -1,12 +1,12 @@
 import os
 import sys
 import time
-from layers import TransformerWrapper
+from layers_tf import TransformerWrapper
 
 import utils
-import model
-import layers
-import data_generator as data_gen
+import transformers_tf.model as model
+import layers_tf
+import transformers_tf.data_generator as data_gen
 
 import numpy as np
 import tensorflow as tf
@@ -14,7 +14,6 @@ from tensorflow.keras.utils import Progbar
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.losses import CategoricalCrossentropy, SparseCategoricalCrossentropy
 
-#def prep_train(config):
 config = 'flickr_inception_transformer2d'
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 checkpoints = os.path.join(cur_dir, 'checkpoints')
@@ -52,7 +51,7 @@ elif cfg['model'] == 'transformer':
         file_model
     )
 elif cfg['model'] == 'transformer2d':
-    caption_model = layers.TransformerWrapper(
+    caption_model = layers_tf.TransformerWrapper(
         int(cfg['NUM_LAYERS']), 
         int(cfg['EMBED_DIM']), 
         int(cfg['NUM_HEADS']), 
@@ -62,74 +61,6 @@ elif cfg['model'] == 'transformer2d':
         vocab_size, 
         max_length
     )
-
-#return run_path, cfg, vocab_size, max_length, caption_model
-
-def loss_function_(loss_obj, real, pred):
-    # Since the decoder generates one word at a time, only the last word matters
-    # (the rest is padded)
-    loss_ = loss_obj(real, pred)
-    batch_size = loss_.shape[0]
-    return tf.reduce_sum(loss_) / batch_size
-
-'''def train(config):
-    # Prepare variables
-    run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
-
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                            initial_learning_rate=1e-4,
-                            decay_steps=10000,
-                            decay_rate=0.9
-    )
-    optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
-                                    epsilon=1e-9)
-    loss_object = CategoricalCrossentropy(reduction='none')
-    loss_monitor = 0
-
-    train_gen = data_gen.DataGenerator(vocab_size, max_length, config)
-    metric_name = ['cross_entropy']
-    batch_size = train_gen.get_batch_size()
-    num_samples = int(train_gen.get_max_count() / batch_size)
-
-    for epoch in range(int(cfg['epochs'])):
-        start = time.time()
-        pb_i = Progbar(num_samples, stateful_metrics=metric_name)
-        
-        for c in range(0, num_samples, batch_size):
-            f_tensor, seq_tensor, target = train_gen.__getitem__(c)
-
-            with tf.GradientTape() as tape:
-                # If the batch only has one sample, expand dims to match previous tensors
-                if len(seq_tensor.shape) < 2:
-                    seq_tensor = tf.expand_dims(seq_tensor, axis=0)
-                if len(target.shape) < 2:
-                    target = tf.expand_dims(target, axis=0)
-
-                #seq_tensor = seq_tensor[:, :-1]
-                #target = target[:, 1:, :]
-                
-                pred = caption_model([f_tensor, seq_tensor])
-                loss = loss_function(loss_object, target, pred)
-                #loss = loss_object(target, pred)
-                
-                pb_i.add(batch_size, values=[('cross_entropy', loss)])
-
-            gradients = tape.gradient(loss, caption_model.trainable_variables)
-            optimizer.apply_gradients(
-                            (grad, var)
-                            for (grad, var) in zip(gradients, caption_model.trainable_variables)
-                            if grad is not None)
-
-        print('Epoch {} :>: Loss {:.4f}'.format(epoch + 1, loss.numpy()))
-        print('Time taken for 1 epoch {} secs\n'.format(time.time() - start))
-
-        # Monitor loss in order to save model
-        if loss.numpy() < loss_monitor or epoch == 0:
-            print('Saved Model Weights>...', run_path)
-            caption_model.save_weights(run_path)
-            loss_monitor = loss.numpy()
-
-        train_gen.on_epoch_end()'''
 
 class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
    def __init__(self, d_model, warmup_steps=4000):
@@ -157,15 +88,7 @@ def create_masks_decoder(tar):
    combined_mask = tf.maximum(dec_target_padding_mask, look_ahead_mask)
    return combined_mask
 
-#def train2D(config):
-# Prepare variables
-#run_path, cfg, vocab_size, max_length, caption_model = prep_train(config)
 
-'''lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-                        initial_learning_rate=1e-4,
-                        decay_steps=4000,
-                        decay_rate=1.5
-)'''
 lr_schedule = CustomSchedule(int(cfg['EMBED_DIM']))
 optimizer = tf.keras.optimizers.Adam(lr_schedule, beta_1=0.9, beta_2=0.98,
                                 epsilon=1e-9)
@@ -209,26 +132,9 @@ for epoch in range(int(cfg['epochs'])):
     
     for c in range(0, num_samples, batch_size):
         f_tensor, seq_tensor = train_gen.__getitem__(c)
-        #print('NEW SHAPES: x1>{}, x2>{}, y>{}'.format(f_tensor.shape, seq_tensor.shape, target.shape))
-        '''pad_mask, look_mask = model.create_masks(seq_tensor)
-        comb_mask = tf.maximum(pad_mask, look_mask)
-        
-        with tf.GradientTape() as tape:
-            preds, _ = caption_model(f_tensor, seq_tensor, True, comb_mask)
-            loss = loss_function2d(loss_object, target, preds)'''
         train_step(f_tensor, seq_tensor)
-        if c % 50 == 0:
-            print ('Epoch {} Batch {} Loss {:.4f} Accuracy {:.4f}'.format(
-            epoch + 1, c, train_loss.result(), train_accuracy.result()))
-
             
         pb_i.add(batch_size, values=[('cross_entropy', train_loss.result())])
-
-        '''gradients = tape.gradient(loss, caption_model.trainable_variables)
-        optimizer.apply_gradients(
-                        (grad, var)
-                        for (grad, var) in zip(gradients, caption_model.trainable_variables)
-                        if grad is not None)'''
 
     print ('Epoch {} Loss {:.4f} Accuracy {:.4f}'.format(epoch + 1,
                                                train_loss.result(),
@@ -242,13 +148,3 @@ for epoch in range(int(cfg['epochs'])):
         loss_monitor = train_loss.result()
 
     train_gen.on_epoch_end()
-
-'''if __name__ == "__main__":
-    print('<Train>')
-    m = sys.argv[1].split('_')[2]
-    if any(char.isdigit() for char in m):
-        # Transformer 2D
-        train2D(sys.argv[1])
-    else:
-        train(sys.argv[1])
-    print('<Done>')'''

@@ -3,8 +3,8 @@ import pickle
 import configparser
 import numpy as np
 
-import model
-import layers
+import transformers_tf.model as model
+import layers_tf
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -296,7 +296,7 @@ def load_model(config):
         f_shape = int(cfg['f_shape'])
         caption_model = model.transformer_caption_model(f_shape, vocab_size, max_length, file_model)
     elif cfg['model'] == 'transformer2d':
-        caption_model = layers.TransformerWrapper(
+        caption_model = layers_tf.TransformerWrapper(
             int(cfg['NUM_LAYERS']), 
             int(cfg['EMBED_DIM']), 
             int(cfg['NUM_HEADS']), 

@@ -3,8 +3,8 @@ import sys
 import time
 
 import utils
-import model
-import data_generator as data_gen
+import transformers_tf.model as model
+import transformers_tf.data_generator as data_gen
 
 import numpy as np
 
