@@ -10,9 +10,9 @@ class Flickr8kDataset(torch.utils.data.Dataset):
         cur_dir = os.path.dirname(os.path.abspath(__file__))
         cur_dir = cur_dir.replace('transformers', '')
 
-        self.features = None
+        self.file_f = None
         if features is not None:
-            self.features = os.path.join(cur_dir, 'data/' + features + '.pkl')
+            self.file_f = os.path.join(cur_dir, 'data/' + features + '.pkl')
         self.img_path = os.path.join(cur_dir, 'data/Flicker8k_Dataset')
 
         if mode == 'train':
@@ -22,6 +22,7 @@ class Flickr8kDataset(torch.utils.data.Dataset):
         self.file_d = os.path.join(cur_dir, 'data/descriptions.txt')
         
         self.ids = self.load_ids(file_t)
+        self.features = self.load_img_features(self.file_f)
         
         self.tokenize()
         self.vocab_size = len(self.tokenizer.word_index) + 1
@@ -33,23 +34,34 @@ class Flickr8kDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         id = self.ids[index]
 
-        # Get Caption
+        # Get Caption Candidates (remove SOS and EOS)
         caps_list = self.caps[id]
+
         # Choose a random caption for training
         cap = random.choice(caps_list)
+        cap_len = len(cap.split(' '))
+        # The caption has at least SOS, EOS and a word
+        assert cap_len >= 3
         cap = self.prep_cap(cap)
 
         # Get Img
         if self.features is not None:
-            image = self.load_img_features(self.features, id)
+            image = self.features[id][0]
         else:
             img = os.path.join(self.img_path, id + '.jpg')
             image = self.load_image(img)
 
+        # Convert to tensors
+        image = torch.FloatTensor(image)
+        cap = torch.LongTensor(cap)
+        cap_len = torch.LongTensor([cap_len])
+
         if self.mode == 'train':
-            return image, cap
+            return image, cap, cap_len
         else:
-            return image, cap, caps_list
+            caps_list = [cap.replace('SOS ', '') for cap in caps_list]
+            caps_list = [cap.replace(' EOS', '') for cap in caps_list]
+            return image, cap, cap_len, caps_list
 
     def max_length(self, descs):
         dc = list()
@@ -60,7 +72,7 @@ class Flickr8kDataset(torch.utils.data.Dataset):
     def prep_cap(self, cap):
         from tensorflow.keras.preprocessing.sequence import pad_sequences
         seq = self.tokenizer.texts_to_sequences([cap])[0]
-        return pad_sequences([seq], maxlen=self.maxlen, padding='post')[0]
+        return pad_sequences([seq], maxlen=self.maxlen + 1, padding='post')[0]
 
     def load_ids(self, file):
         ids = []
@@ -70,10 +82,10 @@ class Flickr8kDataset(torch.utils.data.Dataset):
                 ids.append(id.split('.')[0])
         return ids
 
-    def load_img_features(self, file, id):
+    def load_img_features(self, file):
         import pickle
         features = pickle.load(open(file, 'rb'))
-        return features[id][0]
+        return features
 
     def load_descs(self, file, ids):
         file = open(file, 'r')

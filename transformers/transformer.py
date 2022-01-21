@@ -1,11 +1,27 @@
-from ast import Mult
-from re import sub
-from xml.sax.xmlreader import InputSource
 import torch
+import torchvision
 import numpy as np
 import torch.nn as nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class FeatureExtraction(nn.Module):
+    def __init__(self, size=14):
+        super(FeatureExtraction, self).__init__()
+        self.size = size
+
+        resnet = torchvision.models.resnet101(pretrained=True)
+        modules = list(resnet.children())[:-2]
+        self.resnet = nn.Sequential(*modules)
+
+        self.pool = nn.AdaptiveAvgPool2d((self.size, self.size))
+
+    def forward(self, features):
+        #out = self.resnet(images)
+        out = features.permute(0, 3, 1, 2)
+        out = self.pool(out)
+        out = out.permute(0, 2, 3, 1)
+        return out
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, qkv_dim):
@@ -61,7 +77,7 @@ class MultiHeadAttention(nn.Module):
 
         att_mask = att_mask.unsqueeze(1).repeat(1, self.n_heads, 1, 1)
         context, att = ScaledDotProductAttention(self.qkv_dim)(q_s, k_s, v_s, att_mask)
-        context = context.transpose(1, 2).contigous().view(batch_size, -1, self.n_heads * self.qkv_dim).to(device)
+        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.n_heads * self.qkv_dim).to(device)
         # out: (batch_size, len_q, embed_dim)
         out = self.w_o(context)
         out = self.dropout(out)
@@ -69,8 +85,9 @@ class MultiHeadAttention(nn.Module):
 
 class PointWiseFeedForwardNet(nn.Module):
     def __init__(self, embed_dim, d_ff, rate):
-        self.conv1 = nn.Conv1d(in_channeld=embed_dim, out_channels=d_ff, kernel_size=1).to(device)
-        self.conv2 = nn.Conv1d(in_channeld=d_ff, out_channels=embed_dim, kernel_size=1).to(device)
+        super(PointWiseFeedForwardNet, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=embed_dim, out_channels=d_ff, kernel_size=1).to(device)
+        self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=embed_dim, kernel_size=1).to(device)
         self.dropout = nn.Dropout(p=rate)
         self.embed_dim = embed_dim
     
@@ -179,14 +196,14 @@ class Decoder(nn.Module):
         self.att_method = att_method
 
     def get_pos_embedding_table(self, embed_dim):
-        def cal_angle(pos, h_index):
-            return pos / np.power(10000, 2 * (h_index // 2) / embed_dim)
-        def get_pos_angle_vec(pos):
-            return [cal_angle(pos, h_index) for h_index in range(embed_dim)]
+        def cal_angle(position, hid_idx):
+            return position / np.power(10000, 2 * (hid_idx // 2) / embed_dim)
+        def get_posi_angle_vec(position):
+            return [cal_angle(position, hid_idx) for hid_idx in range(embed_dim)]
 
-        embedding_table = np.array([get_pos_angle_vec(pos_i) for pos_i in range(52)])
-        embedding_table[:, 0::2] = np.sin(embedding_table[:, 0::2]) # 2i
-        embedding_table[:, 1::2] = np.cos(embedding_table[:, 1::2]) # 2i+1
+        embedding_table = np.array([get_posi_angle_vec(pos_i) for pos_i in range(self.maxlen)])
+        embedding_table[:, 0::2] = np.sin(embedding_table[:, 0::2])  # dim 2i
+        embedding_table[:, 1::2] = np.cos(embedding_table[:, 1::2])  # dim 2i+1
         return torch.FloatTensor(embedding_table).to(device)
 
     def get_att_pad_mask(self, seq_q, seq_k):
@@ -211,7 +228,11 @@ class Decoder(nn.Module):
         lengths: (batch_size, 1)
         '''
         batch_size = enc_out.size(0)
-
+        # Sort by lengths
+        cap_lengths, sorted_idx = lengths.squeeze(1).sort(dim=0, descending=True)
+        enc_out = enc_out[sorted_idx]
+        captions = captions[sorted_idx]
+        dec_lengths = (cap_lengths - 1).tolist()
         '''
         out: (batch_size, max_len, embed_dim)
         pad_mask: (batch_size, len_q, len_k), 1 if pad=0
@@ -235,11 +256,12 @@ class Decoder(nn.Module):
             dec_atts.append(dec_att)
             dec_enc_atts.append(dec_enc_att)
         preds = self.projection(dec_out)
-        return preds, captions, dec_atts, dec_enc_atts
+        return preds, captions, dec_lengths, sorted_idx, dec_atts, dec_enc_atts
 
 class Transformer(nn.Module):
-    def __init__(self, embed_dim, enc_layers, dec_layers, n_heads=8, att_method='pixel', vocab_size, maxlen, rate=0.1):
+    def __init__(self, embed_dim, enc_layers, dec_layers, n_heads, vocab_size, maxlen, att_method='pixel', rate=0.1):
         super(Transformer, self).__init__()
+        self.f_exct = FeatureExtraction()
         self.encoder = Encoder(enc_layers, n_heads, att_method, rate)
         self.decoder = Decoder(dec_layers, n_heads, embed_dim, att_method, vocab_size, maxlen, rate)
         self.embedding = self.decoder.tg_emb
@@ -252,10 +274,15 @@ class Transformer(nn.Module):
         for p in self.embedding.parameters():
             p.requires_grad = fine_tune
 
-    def forward(self, enc_input, caption):
+    def forward(self, enc_input, caption, len):
         '''
-        
+        enc_input: (batch_size, 196, 2048)
+        captions: (batch_size, maxlen)
+
         '''
+        # in: (batch_size, 7, 7, 2048)
+        enc_input = self.f_exct(enc_input)
+        # out: (batch_size, 14, 14, 2048)
         batch_size = enc_input.size(0)
         enc_dim = enc_input.size(-1)
         if self.att_method == 'pixel':
@@ -263,4 +290,8 @@ class Transformer(nn.Module):
         elif self.att_method == 'channel':
             enc_input = enc_input.view(batch_size, -1, enc_dim).permute(0, 2, 1) # (batch_size, 2048, 196)
         
-        
+        enc_out, enc_atts = self.encoder(enc_input)
+        # out: (batch_size, 196, 2048)
+        preds, caption, dec_lengths, sorted_idx, dec_atts, dec_enc_atts = self.decoder(enc_out, caption, len)
+        alphas = {"enc_atts:": enc_atts, "dec_atts": dec_atts, "dec_enc_atts": dec_enc_atts}
+        return preds, caption, dec_lengths, sorted_idx, alphas

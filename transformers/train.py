@@ -7,14 +7,16 @@ import matplotlib.pyplot as plt
 
 import eval
 import utils
+import transformer
 import simple_transformer
 
-import os
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+#import os
+#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.nn.utils.rnn import pack_padded_sequence
 
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.preprocessing.text import Tokenizer
@@ -24,30 +26,37 @@ from tensorflow.keras.preprocessing.sequence import pad_sequences
 
 import dataset
 
-cur_dir = os.path.dirname(os.path.abspath(__file__))
-if cur_dir.split('/')[-1] == 'transformers':
-    cur_dir = cur_dir.replace('transformers', '')
-data_path = os.path.join(cur_dir, 'data-30/flickr30k_images/flickr30k_images')
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def save_checkpoint(name, epoch, model, optimizer, metrics, args):
+    state = {'epoch': epoch,
+             'metrics': metrics,
+             'model': model,
+             'optimizer': optimizer,
+             'args': args}
+
+    filename = './tmp/checkpoint_' + name + '.pth.tar'
+    torch.save(state, filename)
+
 # Model hyperparameters
-src_vocab_size = 256
-trg_vocab_size = 7579
-embedding_size = 512
-num_heads = 8
-num_encoder_layers = 3
-num_decoder_layers = 3
-dropout = 0.10
-max_len_s = 2048
-max_len_t = 34
-forward_expansion = 4
-src_pad_idx = 0
+args = {
+    'src_vocab_size': 256,
+    'trg_vocab_size': 7579,
+    'embed_dim': 512,
+    'n_heads': 8,
+    'num_enc_layers': 3,
+    'num_dec_layers': 3,
+    'dropout': 0.10,
+    'max_len_s': 2048,
+    'max_len_t': 35,
+    'att_method': 'pixel',
+    'src_pad_idx': 0
+}
 
 # Training hyperparameters
-learning_rate = 3e-4
+learning_rate = 1e-4
 
-model = simple_transformer.Transformer(
+'''model = simple_transformer.Transformer(
     embedding_size,
     src_vocab_size,
     trg_vocab_size,
@@ -60,21 +69,26 @@ model = simple_transformer.Transformer(
     max_len_s,
     max_len_t,
     device,
+).to(device)'''
+model = transformer.Transformer(
+    args['embed_dim'],
+    args['num_enc_layers'],
+    args['num_dec_layers'],
+    args['n_heads'],
+    args['trg_vocab_size'],
+    args['max_len_t'],
+    args['att_method']
 ).to(device)
-
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, factor=0.1, patience=10, verbose=True
-)
 
 epochs = 10
 pad_idx = 0
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx).cuda()
 
 # Parameters
 params = {'batch_size': 1,
           'shuffle': True,
-          'num_workers': 6}
+          'num_workers': 1}
 batch_size = int(params['batch_size'])
 
 data = dataset.Flickr8kDataset('train', 'features_resnet')
@@ -88,19 +102,19 @@ def train():
     i = 0
     total_loss = 0
     start_time = time.time()
-    for src, tar in train_gen:
-        src, tar = np.transpose(src), np.transpose(tar)
-        src = torch.tensor(src).long()
-        tar = torch.tensor(tar).long()
-        #print('SRC>', src.shape)
-        #print('TAR>', tar.shape)
-        
+    for src, tar, tar_len in train_gen:        
         src = src.to(device)
         tar = tar.to(device)
+        tar_len = tar_len.to(device)
         optimizer.zero_grad()
 
-        output = model(src, tar)
-        loss = criterion(output.view(-1, output.shape[2]), tar.reshape(-1))
+        preds, caption, dec_lengths, sorted_idx, alphas = model(src, tar, tar_len)
+        
+        targets = caption[:, 1:]
+        preds = pack_padded_sequence(preds, dec_lengths, batch_first=True).data
+        targets = pack_padded_sequence(targets, dec_lengths, batch_first=True).data
+        
+        loss = criterion(preds, targets)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
@@ -128,6 +142,6 @@ for epoch in range(1, epochs + 1):
     print('| end of epoch {:3d} | time: {:5.2f}s | Training loss {:5.2f} | '
           .format(epoch, (time.time() - epoch_start_time),
                                      loss))
-    torch.save(model.state_dict(), "simple_transformer.pt")
     
-eval.eval_epoch(data_val, val_gen, model, device)
+    metrics = eval.eval_epoch(data_val, val_gen, model, device)
+    torch.save('transformer_pixel', epoch, model, optimizer, metrics, args)

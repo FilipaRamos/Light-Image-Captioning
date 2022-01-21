@@ -6,6 +6,7 @@ import utils
 
 from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing import image
+from tensorflow.keras.layers import AveragePooling2D
 from tensorflow.keras.applications.vgg19 import VGG19, preprocess_input
 from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
 from tensorflow.keras.applications.resnet import ResNet101, preprocess_input
@@ -26,8 +27,8 @@ def feature_extraction(in_dir, cfg):
         model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
     elif cfg['backbone'] == 'resnet':
         tg_size = 224
-        model = ResNet101(weights='imagenet', include_top=False, pooling='avg')
-        model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
+        mod = ResNet101(weights='imagenet', include_top=False, pooling=None)
+        mod = Model(inputs=mod.inputs, outputs=mod.layers[-1].output)
 
     print(model.summary())
     # Pre-extract features for all images in the dataset
@@ -43,6 +44,7 @@ def feature_extraction(in_dir, cfg):
         ft = model.predict(img, verbose=0)
         img_id = name.split('.')[0]
         features[img_id] = ft
+        print(ft.shape)
         print("Done with>%s" % name)
     return features
 
