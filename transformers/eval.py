@@ -100,7 +100,7 @@ def eval_epoch(dataset, test_gen, model, device):
         tar = torch.tensor(tar).long()
         src = src.to(device)
         tar = tar.to(device)
-        print(caps)        
+
         model.eval()
         output = model(src, tar)
         loss = criterion(output.view(-1, output.shape[2]), tar.reshape(-1))
@@ -114,15 +114,12 @@ def eval_epoch(dataset, test_gen, model, device):
                 if value == word.item() and value != 1: # <start>
                     pred = pred + key + ' '
                     break
-        #references = []
-        #for cap in tar:
-        #    references.append([d.split() for d in cap])
+
+        caps = [t[0] for t in caps]
         references = [d.split() for d in caps]
         targets.append(references)
         preds.append(pred.split())
     
-
-    print(references)
     bleu1 = corpus_bleu(targets, preds, weights=(1.0, 0, 0, 0))
     bleu2 = corpus_bleu(targets, preds, weights=(0.5, 0.5, 0, 0))
     bleu3 = corpus_bleu(targets, preds, weights=(0.3, 0.3, 0.3, 0))

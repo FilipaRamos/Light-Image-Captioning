@@ -8,6 +8,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.vgg19 import VGG19, preprocess_input
 from tensorflow.keras.applications.inception_v3 import InceptionV3, preprocess_input
+from tensorflow.keras.applications.resnet import ResNet101, preprocess_input
 
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -23,6 +24,11 @@ def feature_extraction(in_dir, cfg):
         else:
             model = InceptionV3(weights='imagenet', include_top=False, pooling='avg')
         model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
+    elif cfg['backbone'] == 'resnet':
+        tg_size = 224
+        model = ResNet101(weights='imagenet', include_top=False, pooling='avg')
+        model = Model(inputs=model.inputs, outputs=model.layers[-1].output)
+
     print(model.summary())
     # Pre-extract features for all images in the dataset
     features = dict()

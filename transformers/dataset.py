@@ -4,12 +4,15 @@ import random
 import numpy as np
 
 class Flickr8kDataset(torch.utils.data.Dataset):
-    def __init__(self, mode):
+    def __init__(self, mode, features):
         self.mode = mode
     
         cur_dir = os.path.dirname(os.path.abspath(__file__))
         cur_dir = cur_dir.replace('transformers', '')
 
+        self.features = None
+        if features is not None:
+            self.features = os.path.join(cur_dir, 'data/' + features + '.pkl')
         self.img_path = os.path.join(cur_dir, 'data/Flicker8k_Dataset')
 
         if mode == 'train':
@@ -18,7 +21,7 @@ class Flickr8kDataset(torch.utils.data.Dataset):
             file_t = os.path.join(cur_dir, 'data/Flickr_8k.devImages.txt')
         self.file_d = os.path.join(cur_dir, 'data/descriptions.txt')
         
-        self.ids = self.load_ids(file_t)[:1001]
+        self.ids = self.load_ids(file_t)
         
         self.tokenize()
         self.vocab_size = len(self.tokenizer.word_index) + 1
@@ -32,15 +35,16 @@ class Flickr8kDataset(torch.utils.data.Dataset):
 
         # Get Caption
         caps_list = self.caps[id]
-#        caps_list = [d[0] for d in caps_list]
-#        print(caps_list)
         # Choose a random caption for training
         cap = random.choice(caps_list)
         cap = self.prep_cap(cap)
 
         # Get Img
-        img = os.path.join(self.img_path, id + '.jpg')
-        image = self.load_image(img)
+        if self.features is not None:
+            image = self.load_img_features(self.features, id)
+        else:
+            img = os.path.join(self.img_path, id + '.jpg')
+            image = self.load_image(img)
 
         if self.mode == 'train':
             return image, cap
@@ -65,6 +69,11 @@ class Flickr8kDataset(torch.utils.data.Dataset):
                 id = line.rstrip()
                 ids.append(id.split('.')[0])
         return ids
+
+    def load_img_features(self, file, id):
+        import pickle
+        features = pickle.load(open(file, 'rb'))
+        return features[id][0]
 
     def load_descs(self, file, ids):
         file = open(file, 'r')

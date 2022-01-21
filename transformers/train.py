@@ -9,6 +9,9 @@ import eval
 import utils
 import simple_transformer
 
+import os
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -30,13 +33,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Model hyperparameters
 src_vocab_size = 256
-trg_vocab_size = 7577
+trg_vocab_size = 7579
 embedding_size = 512
 num_heads = 8
 num_encoder_layers = 3
 num_decoder_layers = 3
 dropout = 0.10
-max_len_s = 3072
+max_len_s = 2048
 max_len_t = 34
 forward_expansion = 4
 src_pad_idx = 0
@@ -64,7 +67,7 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, factor=0.1, patience=10, verbose=True
 )
 
-epochs = 1
+epochs = 10
 pad_idx = 0
 criterion = nn.CrossEntropyLoss(ignore_index=pad_idx).cuda()
 
@@ -74,21 +77,23 @@ params = {'batch_size': 1,
           'num_workers': 6}
 batch_size = int(params['batch_size'])
 
-data = dataset.Flickr8kDataset('train')
+data = dataset.Flickr8kDataset('train', 'features_resnet')
 train_gen = torch.utils.data.DataLoader(data, **params)
-data_val = dataset.Flickr8kDataset('test')
+data_val = dataset.Flickr8kDataset('test', 'features_resnet')
 val_gen = torch.utils.data.DataLoader(data_val, **params)
 
 def train():
     model.train() # Turn on the train mode
     
+    i = 0
     total_loss = 0
     start_time = time.time()
-    i = 0
     for src, tar in train_gen:
         src, tar = np.transpose(src), np.transpose(tar)
         src = torch.tensor(src).long()
         tar = torch.tensor(tar).long()
+        #print('SRC>', src.shape)
+        #print('TAR>', tar.shape)
         
         src = src.to(device)
         tar = tar.to(device)

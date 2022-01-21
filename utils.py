@@ -4,7 +4,7 @@ import configparser
 import numpy as np
 
 import transformers_tf.model as model
-import layers_tf
+import transformers_tf.layers as layers
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing.text import Tokenizer
