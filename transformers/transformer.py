@@ -15,10 +15,12 @@ class FeatureExtraction(nn.Module):
         self.resnet = nn.Sequential(*modules)
 
         self.pool = nn.AdaptiveAvgPool2d((self.size, self.size))
+        
+        for p in self.resnet.parameters():
+            p.requires_grad = False
 
-    def forward(self, features):
-        #out = self.resnet(images)
-        out = features.permute(0, 3, 1, 2)
+    def forward(self, img):
+        out = self.resnet(img)
         out = self.pool(out)
         out = out.permute(0, 2, 3, 1)
         return out
@@ -44,7 +46,7 @@ class ScaledDotProductAttention(nn.Module):
         return context, att
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, q_dim, k_dim, qkv_dim, n_heads=3, rate=0.1):
+    def __init__(self, q_dim, k_dim, qkv_dim, n_heads=8, rate=0.1):
         super(MultiHeadAttention, self).__init__()
         self.w_q = nn.Linear(q_dim, qkv_dim * n_heads).to(device)
         self.w_k = nn.Linear(k_dim, qkv_dim * n_heads).to(device)
@@ -83,9 +85,9 @@ class MultiHeadAttention(nn.Module):
         out = self.dropout(out)
         return nn.LayerNorm(self.embed_dim).to(device)(out + residual), att
 
-class PointWiseFeedForwardNet(nn.Module):
+class PosWiseFeedForwardNet(nn.Module):
     def __init__(self, embed_dim, d_ff, rate):
-        super(PointWiseFeedForwardNet, self).__init__()
+        super(PosWiseFeedForwardNet, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=embed_dim, out_channels=d_ff, kernel_size=1).to(device)
         self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=embed_dim, kernel_size=1).to(device)
         self.dropout = nn.Dropout(p=rate)
@@ -107,10 +109,10 @@ class EncoderLayer(nn.Module):
         super(EncoderLayer, self).__init__()
         if att_method == 'pixel':
             self.enc_att = MultiHeadAttention(q_dim=2048, k_dim=2048, qkv_dim=64, n_heads=n_heads, rate=rate)
-            self.ffn = PointWiseFeedForwardNet(embed_dim=2048, d_ff=4096, rate=rate)
+            self.ffn = PosWiseFeedForwardNet(embed_dim=2048, d_ff=4096, rate=rate)
         elif att_method == 'channel':
             self.enc_att = MultiHeadAttention(q_dim=196, k_dim=196, qkv_dim=64, n_heads=n_heads, rate=rate)
-            self.ffn = PointWiseFeedForwardNet(embed_dim=196, d_ff=512, rate=rate)
+            self.ffn = PosWiseFeedForwardNet(embed_dim=196, d_ff=512, rate=rate)
 
     def forward(self, input, att_mask):
         '''
@@ -136,7 +138,7 @@ class Encoder(nn.Module):
             y = pos // 14
             x_enc = x / np.power(10000, h_index / 1024)
             y_enc = y / np.power(10000, h_index / 1024)
-            return np.sin(x_enc), np.sin(y_enc)
+            return np.sin(x_enc), np.sin(y_enc) # sin?
         def get_pos_angle_vec(pos):
             return [cal_angle(pos, h_index)[0] for h_index in range(1024)] \
                 + [cal_angle(pos, h_index)[1] for h_index in range(1024)]  
@@ -144,20 +146,20 @@ class Encoder(nn.Module):
         embedding_table = np.array([get_pos_angle_vec(pos_i) for pos_i in range(196)])
         return torch.FloatTensor(embedding_table).to(device)              
 
-    def forward(self, input):
+    def forward(self, enc_out):
         '''
         input: (batch_size, num_pixels=196, d_model=2048)
         '''
-        batch_size = input.size(0)
-        pos = input.size(1)
+        batch_size = enc_out.size(0)
+        pos = enc_out.size(1)
         if self.att_method == 'pixel':
-            out = input + self.pos_emb(torch.LongTensor([list(range(pos))] * batch_size).to(device))
+            enc_out = enc_out + self.pos_emb(torch.LongTensor([list(range(pos))] * batch_size).to(device))
         att_mask = (torch.tensor(np.zeros((batch_size, pos, pos))).to(device) == torch.tensor(np.ones((batch_size, pos, pos))).to(device))
         enc_att = []
         for layer in self.layers:
-            out, att = layer(out, att_mask)
+            enc_out, att = layer(enc_out, att_mask)
             enc_att.append(att)
-        return out, enc_att
+        return enc_out, enc_att
 
 class DecoderLayer(nn.Module):
     def __init__(self, embed_dim, n_heads, att_method, rate):
@@ -165,10 +167,10 @@ class DecoderLayer(nn.Module):
         self.dec_att = MultiHeadAttention(q_dim=embed_dim, k_dim=embed_dim, qkv_dim=64, n_heads=n_heads, rate=rate)
         if att_method == 'pixel':
             self.dec_enc_att = MultiHeadAttention(q_dim=embed_dim, k_dim=2048, qkv_dim=64, n_heads=n_heads, rate=rate)
-            self.ffn = PointWiseFeedForwardNet(embed_dim=embed_dim, d_ff=2048, rate=rate)
+            self.ffn = PosWiseFeedForwardNet(embed_dim=embed_dim, d_ff=2048, rate=rate)
         elif att_method == 'channel':
             self.dec_enc_att = MultiHeadAttention(q_dim=embed_dim, k_dim=196, qkv_dim=64, n_heads=n_heads, rate=rate)
-            self.ffn = PointWiseFeedForwardNet(embed_dim=embed_dim, d_ff=2048, rate=rate)
+            self.ffn = PosWiseFeedForwardNet(embed_dim=embed_dim, d_ff=2048, rate=rate)
         
     def forward(self, dec_input, enc_output, dec_self_att_mask, dec_enc_att_mask):
         '''
@@ -280,6 +282,7 @@ class Transformer(nn.Module):
         captions: (batch_size, maxlen)
 
         '''
+        # in: (batch_size, 3, 256, 256)
         # in: (batch_size, 7, 7, 2048)
         enc_input = self.f_exct(enc_input)
         # out: (batch_size, 14, 14, 2048)
