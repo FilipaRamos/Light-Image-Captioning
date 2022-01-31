@@ -226,37 +226,6 @@ def generate_transformer_desc(model, tokenizer, img, max_length):
             break
     return input
 
-'''def generate_transformer2d_desc(md, tokenizer, img, max_length):
-    import tensorflow as tf
-    input = '<start>'
-    # Reshape img features
-    img = tf.reshape(img, (img.shape[0], -1, img.shape[3]))
-    
-    for i in range(max_length):
-        seq = tokenizer.texts_to_sequences([input])
-        seq = pad_sequences(seq, maxlen=max_length, padding='post')
-
-        # Preds will be (1, max_length, vocab_size)
-        seq = np.array(seq)
-        pad_mask, look_mask = model.create_masks(seq, max_length)
-        comb_mask = tf.maximum(pad_mask, look_mask)
-
-        pred, att_weights = md(img, seq, False, comb_mask)
-        # Last row is the predicted next word
-        pred = pred[:, -1:, :]
-        pred = tf.cast(tf.argmax(pred, axis=-1), tf.int32)
-        #pred = np.argmax(pred)
-        word = word_by_id(pred, tokenizer)
-
-        if word is None:
-            break
-
-        input += ' ' + word
-        
-        if word == '<end>':
-            break
-    return input, att_weights'''
-
 def generate_transformer2d_desc(md, tokenizer, img, max_length):
     import tensorflow as tf
     start_token = tokenizer.word_index['<start>']

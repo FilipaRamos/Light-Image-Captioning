@@ -105,6 +105,6 @@ light-image-captioning
 
 In order to prepare the data for testing the models, the Flickr 8k dataset must be downloaded into `data`. Download [Flick8k_Dataset](https://github.com/jbrownlee/Datasets/releases/download/Flickr8k/Flickr8k_Dataset.zip) and [Flickr8k_Text](https://github.com/jbrownlee/Datasets/releases/download/Flickr8k/Flickr8k_text.zip). Extract the zips in the `data` folder.
 
-For COCO, we keep a separate folder named data-coco. Download and extract [COCO_Train](http://images.cocodataset.org/zips/train2014.zip), [COCO_Val](http://images.cocodataset.org/zips/val2014.zip) to the aforementioned folder. For the karpathy splits, download [Karpathy Splits](http://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip) and extract into data-coco/caption_dataset.
+For COCO, we keep a separate folder named `data-coco`. Download and extract [COCO_Train](http://images.cocodataset.org/zips/train2014.zip), [COCO_Val](http://images.cocodataset.org/zips/val2014.zip) to the aforementioned folder. For the karpathy splits, download [Karpathy Splits](http://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip) and extract into `data-coco/caption_dataset`.
 
 And we are done! Refer to each folder's README for further instructions.
